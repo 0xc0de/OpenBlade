@@ -1,0 +1,3 @@
+[submodule "Hork-Source"]
+	path = Hork-Source
+	url = https://github.com/Hork-Engine/Hork-Source
