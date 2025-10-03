@@ -1,0 +1,172 @@
+white
+{
+	Material "/Root/default/materials/compiled/default.mat"
+	Textures
+	[
+		"/Root/white.png"
+	]
+	Constants
+	[
+		// Metallic
+		"0"
+		
+		// Roughness
+		"1"
+	]
+}
+
+gray
+{
+	Material "/Root/default/materials/compiled/default.mat"
+	Textures
+	[
+		"/Root/gray.png"
+	]
+	Constants
+	[
+		// Metallic
+		"0"
+		
+		// Roughness
+		"1"
+	]
+}
+
+dirt
+{
+	Material "/Root/default/materials/compiled/default.mat"
+	Textures
+	[
+		"/Root/dirt.png"
+	]
+	Constants
+	[
+		// Metallic
+		"0"
+		
+		// Roughness
+		"1"
+	]
+}
+
+dirt_sslr
+{
+	Material "/Root/default/materials/compiled/default_sslr.mat"
+	Textures
+	[
+		"/Root/dirt.png"
+	]
+	Constants
+	[
+		// Metallic
+		"0"
+		
+		// Roughness
+		"0.6"
+	]
+}
+
+
+grid8
+{
+	Material "/Root/default/materials/compiled/default.mat"
+	Textures
+	[
+		"/Root/grid8.webp"
+	]
+	Constants
+	[
+		// Metallic
+		"0"
+		
+		// Roughness
+		"1"
+	]
+}
+
+blank256
+{
+	Material "/Root/default/materials/compiled/default.mat"
+	Textures
+	[
+		"/Root/blank256.webp"
+	]
+	Constants
+	[
+		// Metallic
+		"0"
+		
+		// Roughness
+		"1"
+	]
+}
+
+blank512
+{
+	Material "/Root/default/materials/compiled/default.mat"
+	Textures
+	[
+		"/Root/blank512.webp"
+	]
+	Constants
+	[
+		// Metallic
+		"0"
+		
+		// Roughness
+		"0.9"
+	]
+}
+
+blank512_glossy
+{
+	Material "/Root/default/materials/compiled/default.mat"
+	Textures
+	[
+		"/Root/blank512.webp"
+	]
+	Constants
+	[
+		// Metallic
+		"0"
+		
+		// Roughness
+		"0.3"
+	]
+}
+
+red512
+{
+	Material "/Root/default/materials/compiled/default.mat"
+	Textures
+	[
+		"/Root/red512.png"
+	]
+	Constants
+	[
+		// Metallic
+		"0"
+		
+		// Roughness
+		"0.1"
+	]
+}
+
+MetalRoughSpheres
+{
+	Material "/Root/default/materials/compiled/metal_roughness.mat"
+	Textures
+	[
+		"/Root/models/MetalRoughSpheres/Spheres_BaseColor.png"
+		"/Root/models/MetalRoughSpheres/Spheres_MetalRough.png"
+	]
+}
+
+skybox
+{
+	Material "/Root/default/materials/compiled/skybox.mat"
+	Textures
+	[
+		"internal_skybox"
+	]
+}
