@@ -1,12 +1,10 @@
 /*
 
-Hork Engine Source Code
+Open source re-implementation of Blade Of Darkness.
 
 MIT License
 
-Copyright (C) 2017-2024 Alexander Samusev.
-
-This file is part of the Hork Engine Source Code.
+Copyright (C) 2025 Alexander Samusev.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
