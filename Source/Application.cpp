@@ -32,23 +32,31 @@ SOFTWARE.
 #include <Hork/Runtime/World/Modules/Render/Components/DirectionalLightComponent.h>
 #include <Hork/Runtime/World/Modules/Render/RenderInterface.h>
 #include <Hork/Runtime/World/Modules/Input/InputInterface.h>
-#include <Hork/Runtime/World/DebugRenderer.h>
+#include <Hork/RenderUtils/Utilites.h>
+
+#include "Level.h"
 
 using namespace Hk;
 
-class PlayerComponent : public Component
+ConsoleVar demo_gamepath("demo_gamepath"_s, "D:\\Games\\Blade Of Darkness"_s);
+//ConsoleVar demo_gamelevel("demo_gamelevel"_s, "Maps/Mine_M5/mine.lvl"_s);
+ConsoleVar demo_gamelevel("demo_gamelevel"_s, "Maps/Casa/casa.lvl"_s);
+
+
+class SpectatorComponent : public Component
 {
 public:
     static constexpr ComponentMode Mode = ComponentMode::Dynamic;
 
     void BindInput(InputBindings& input)
     {
-        input.BindAxis("MoveForward", this, &PlayerComponent::MoveForward);
-        input.BindAxis("MoveRight", this, &PlayerComponent::MoveRight);
-        input.BindAxis("MoveUp", this, &PlayerComponent::MoveUp);
-        input.BindAxis("MoveDown", this, &PlayerComponent::MoveDown);
-        input.BindAxis("TurnRight", this, &PlayerComponent::TurnRight);
-        input.BindAxis("FreelookHorizontal", this, &PlayerComponent::FreelookHorizontal);
+        input.BindAxis("MoveForward", this, &SpectatorComponent::MoveForward);
+        input.BindAxis("MoveRight", this, &SpectatorComponent::MoveRight);
+        input.BindAxis("MoveUp", this, &SpectatorComponent::MoveUp);
+        input.BindAxis("MoveDown", this, &SpectatorComponent::MoveDown);
+        input.BindAxis("TurnRight", this, &SpectatorComponent::TurnRight);
+        input.BindAxis("FreelookVertical", this, &SpectatorComponent::FreelookVertical);
+        input.BindAxis("FreelookHorizontal", this, &SpectatorComponent::FreelookHorizontal);
     }
 
     void MoveForward(float amount)
@@ -68,36 +76,22 @@ public:
 
     void MoveDown(float amount)
     {
-        GameObject* owner = GetOwner();
-        Hk::Float3 pos = owner->GetWorldPosition();
-        pos.Y -= amount * GetWorld()->GetTick().FrameTimeStep;
-        if (pos.Y < 0)
-            pos.Y = 0;
-        owner->SetWorldPosition(pos);
+        GetOwner()->Move(Float3::sAxisY() * (-amount) * GetWorld()->GetTick().FrameTimeStep);
     }
 
     void TurnRight(float amount)
     {
-        const float RotationSpeed = 1;
-        GetOwner()->Rotate(-amount * GetWorld()->GetTick().FrameTimeStep * RotationSpeed, Float3::sAxisY());
+        GetOwner()->Rotate(-amount * GetWorld()->GetTick().FrameTimeStep, Float3::sAxisY());
+    }
+
+    void FreelookVertical(float amount)
+    {
+        GetOwner()->Rotate(amount, GetOwner()->GetRightVector());
     }
 
     void FreelookHorizontal(float amount)
     {
-        const float RotationSpeed = 1;
-        GetOwner()->Rotate(-amount * RotationSpeed, Float3::sAxisY());
-    }
-
-    void DrawDebug(DebugRenderer& renderer)
-    {
-        GameObject* owner = GetOwner();
-        Float3 pos = owner->GetWorldPosition();
-        Float3 dir = owner->GetWorldForwardVector();
-        Float3 p1 = pos + dir * 0.5f;
-        Float3 p2 = pos + dir * 2.0f;
-        renderer.SetColor(Color4::sBlue());
-        renderer.DrawLine(p1, p2);
-        renderer.DrawCone(p2, owner->GetWorldRotation().ToMatrix3x3() * Float3x3::sRotationAroundNormal(Math::_PI, Float3(1, 0, 0)), 0.4f, 30);
+        GetOwner()->Rotate(-amount, Float3::sAxisY());
     }
 };
 
@@ -105,7 +99,7 @@ class SampleApplication final : public GameApplication
 {
     World*                      m_World{};
     Ref<WorldRenderView>        m_WorldRenderView;
-    Handle32<CameraComponent>   m_MainCamera;
+    BladeLevel                  m_Level;
 
 public:
     SampleApplication(ArgumentPack const& args) :
@@ -124,6 +118,7 @@ public:
         inputMappings->MapAxis(PlayerController::_1, "MoveRight", VirtualKey::D, 1.0f);
         inputMappings->MapAxis(PlayerController::_1, "MoveUp", VirtualKey::Space, 1.0f);
         inputMappings->MapAxis(PlayerController::_1, "MoveDown", VirtualKey::C, 1.0f);
+        inputMappings->MapAxis(PlayerController::_1, "FreelookVertical", VirtualAxis::MouseVertical, 1.0f);
         inputMappings->MapAxis(PlayerController::_1, "FreelookHorizontal", VirtualAxis::MouseHorizontal, 1.0f);
         inputMappings->MapAxis(PlayerController::_1, "TurnRight", VirtualKey::Left, -90.0f);
         inputMappings->MapAxis(PlayerController::_1, "TurnRight", VirtualKey::Right, 90.0f);
@@ -164,29 +159,38 @@ public:
         // Create game world
         m_World = CreateWorld();
 
-        // Create camera
-        m_MainCamera = CreateCamera();
+        // Spawn player
+        GameObject* spectator = CreateSpectator(Float3(0, 2, 0), Quat::sIdentity());
 
         // Set camera for render view
-        m_WorldRenderView->SetCamera(m_MainCamera);
+        m_WorldRenderView->SetCamera(spectator->GetComponentHandle<CameraComponent>());
         m_WorldRenderView->SetWorld(m_World);
-
-        // Spawn player
-        GameObject* player = CreatePlayer(Float3(0, 0, 0), Quat::sIdentity());
 
         // Bind input to the player
         InputInterface& input = m_World->GetInterface<InputInterface>();
-        input.BindInput(player->GetComponentHandle<PlayerComponent>(), PlayerController::_1);
+        input.BindInput(spectator->GetComponentHandle<SpectatorComponent>(), PlayerController::_1);
         input.SetActive(true);
-
-        // Attach main camera to player bind point
-        CameraComponent* cameraComponent = m_World->GetComponent(m_MainCamera);
-        cameraComponent->GetOwner()->SetParent(player->FindChildren(StringID("CameraBindPoint")));
 
         RenderInterface& render = m_World->GetInterface<RenderInterface>();
         render.SetAmbient(0.1f);
 
         CreateScene();
+
+        //auto& resourceMngr = sGetResourceManager();
+
+        //if (auto skybox = spectator->FindChildren(StringID("Skybox")))
+        //{
+        //    if (auto skyboxMesh = skybox->GetComponent<DynamicMeshComponent>())
+        //    {
+        //        Ref<Material> skyboxMaterial = MakeRef<Material>("skybox");
+        //        auto materialResource = resourceMngr.GetResource<MaterialResource>("/Root/default/materials/compiled/skybox.mat");
+
+        //        skyboxMaterial->SetResource(materialResource);
+        //        skyboxMaterial->SetTexture(0, m_Level.GetSkyboxTexture());
+
+        //        skyboxMesh->SetMaterial(skyboxMaterial);
+        //    }
+        //}
     }
 
     void Deinitialize()
@@ -204,6 +208,8 @@ public:
         // List of resources used in scene
         ResourceID sceneResources[] = {
             resourceMngr.GetResource<MeshResource>("/Root/default/box.mesh"),
+            resourceMngr.GetResource<MeshResource>("/Root/default/skybox.mesh"),
+            resourceMngr.GetResource<MaterialResource>("/Root/default/materials/compiled/skybox.mat"),
             resourceMngr.GetResource<MeshResource>("/Root/default/plane_xz.mesh"),
             resourceMngr.GetResource<MaterialResource>("/Root/default/materials/compiled/default.mat"),
             resourceMngr.GetResource<TextureResource>("/Root/grid8.webp")
@@ -217,63 +223,55 @@ public:
         resourceMngr.MainThread_WaitResourceArea(resources);
     }
 
-    GameObject* CreatePlayer(Float3 const& position, Quat const& rotation)
+    GameObject* CreateSpectator(Float3 const& position, Quat const& rotation)
     {
-        static MeshHandle playerMesh = sGetResourceManager().GetResource<MeshResource>("/Root/default/box.mesh");
+        auto& resourceMngr = sGetResourceManager();
+        auto& materialMngr = sGetMaterialManager();
 
-        GameObject* player;
-        Handle32<PlayerComponent> playerComponent;
+        GameObject* spectator;
+
+        GameObjectDesc desc;
+        desc.Name.FromString("Spectator");
+        desc.Position = position;
+        desc.Rotation = rotation;
+        desc.IsDynamic = true;
+        m_World->CreateObject(desc, spectator);
+
+        spectator->CreateComponent<SpectatorComponent>();
+        spectator->CreateComponent<CameraComponent>();
+
+        // Create skybox attached to camera
         {
-            GameObjectDesc desc;
-            desc.Position = position;
-            desc.Rotation = rotation;
+            desc = {};
+            desc.Name.FromString("Skybox");
+            desc.Parent = spectator->GetHandle();
             desc.IsDynamic = true;
-            m_World->CreateObject(desc, player);
-            playerComponent = player->CreateComponent<PlayerComponent>();
-        }
-
-        GameObject* bindPoint;
-        {
-            GameObjectDesc desc;
-            desc.Name.FromString("CameraBindPoint");
-            desc.Parent = player->GetHandle();
             desc.AbsoluteRotation = true;
-            desc.IsDynamic = true;
-            m_World->CreateObject(desc, bindPoint);
-        }
-
-        GameObject* model;
-        {
-            GameObjectDesc desc;
-            desc.Parent = player->GetHandle();
-            desc.Position = Float3(0, 0.5f, 0);
-            desc.IsDynamic = true;
-            m_World->CreateObject(desc, model);
+            GameObject* skybox;
+            m_World->CreateObject(desc, skybox);
 
             DynamicMeshComponent* mesh;
-            model->CreateComponent(mesh);
-            mesh->SetMesh(playerMesh);
-            mesh->SetMaterial(sGetMaterialManager().TryGet("grid8"));
-            mesh->SetLocalBoundingBox({Float3(-0.5f), Float3(0.5f)});
+            skybox->CreateComponent(mesh);
+            mesh->SetLocalBoundingBox({{-0.5f,-0.5f,-0.5f},{0.5f,0.5f,0.5f}});
+
+            mesh->SetMesh(resourceMngr.GetResource<MeshResource>("/Root/default/skybox.mesh"));
+            mesh->SetMaterial(materialMngr.TryGet("skybox"));
+
+            mesh->SetVisibilityLayer(1);
         }
 
-        return player;
+        return spectator;
     }
 
-    Handle32<CameraComponent> CreateCamera()
+    String MakePath(StringView in)
     {
-        GameObjectDesc cameraDesc;
-        cameraDesc.Position = Float3(2, 4, 2);
-        cameraDesc.Rotation = Angl(-60, 45, 0).ToQuat();
-        cameraDesc.IsDynamic = true;
-
-        GameObject* camera;
-        m_World->CreateObject(cameraDesc, camera);
-        return camera->CreateComponent<CameraComponent>();
+        return demo_gamepath.GetString() / in;
     }
 
     void CreateScene()
     {
+        m_Level.Load(MakePath(demo_gamelevel.GetString()));
+
         // Spawn directional light
         {
             GameObjectDesc desc;
@@ -295,10 +293,9 @@ public:
 
         // Spawn ground
         {
-            static MeshHandle groundMesh = sGetResourceManager().GetResource<MeshResource>("/Root/default/plane_xz.mesh");
+            static MeshHandle groundMesh = sGetResourceManager().GetResource<MeshResource>("/Root/default/box.mesh");
 
             GameObjectDesc desc;
-            desc.Scale = {2, 1, 2};
 
             GameObject* ground;
             m_World->CreateObject(desc, ground);
@@ -309,7 +306,7 @@ public:
             groundModel->SetMesh(groundMesh);
             groundModel->SetMaterial(sGetMaterialManager().TryGet("grid8"));
             groundModel->SetCastShadow(false);
-            groundModel->SetLocalBoundingBox({Float3(-128,-0.1f,-128), Float3(128,0.1f,128)});
+            groundModel->SetLocalBoundingBox({Float3(-0.5f), Float3(0.5f)});
         }
     }
 
