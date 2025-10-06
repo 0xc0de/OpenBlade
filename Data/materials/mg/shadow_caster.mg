@@ -1,0 +1,6 @@
+version "1"
+MaterialType "Unlit"
+AllowScreenSpaceReflections "false"
+AllowScreenAmbientOcclusion "false"
+IsTwoSided "true"
+$Color "=(0 0 0)"

@@ -1,0 +1,13 @@
+skywall
+{
+	Material "/Root/materials/compiled/sky.mat"
+	Textures
+	[
+		"internal_skybox"
+	]
+}
+
+shadow_caster
+{
+	Material "/Root/materials/compiled/shadow_caster.mat"
+}
