@@ -41,6 +41,7 @@ using namespace Hk;
 ConsoleVar demo_gamepath("demo_gamepath"_s, "D:\\Games\\Blade Of Darkness"_s);
 //ConsoleVar demo_gamelevel("demo_gamelevel"_s, "Maps/Mine_M5/mine.lvl"_s);
 ConsoleVar demo_gamelevel("demo_gamelevel"_s, "Maps/Casa/casa.lvl"_s);
+ConsoleVar demo_spectatorMoveSpeed("demo_spectatorMoveSpeed"_s, "10"_s);
 
 
 class SpectatorComponent : public Component
@@ -61,21 +62,25 @@ public:
 
     void MoveForward(float amount)
     {
+        amount *= demo_spectatorMoveSpeed.GetFloat();
         GetOwner()->Move(GetOwner()->GetForwardVector() * amount * GetWorld()->GetTick().FrameTimeStep);
     }
 
     void MoveRight(float amount)
     {
+        amount *= demo_spectatorMoveSpeed.GetFloat();
         GetOwner()->Move(GetOwner()->GetRightVector() * amount * GetWorld()->GetTick().FrameTimeStep);
     }
 
     void MoveUp(float amount)
     {
+        amount *= demo_spectatorMoveSpeed.GetFloat();
         GetOwner()->Move(Float3::sAxisY() * amount * GetWorld()->GetTick().FrameTimeStep);
     }
 
     void MoveDown(float amount)
     {
+        amount *= demo_spectatorMoveSpeed.GetFloat();
         GetOwner()->Move(Float3::sAxisY() * (-amount) * GetWorld()->GetTick().FrameTimeStep);
     }
 
@@ -128,6 +133,7 @@ public:
         // Set rendering parameters
         m_WorldRenderView = MakeRef<WorldRenderView>();
         m_WorldRenderView->bDrawDebug = true;
+        //m_WorldRenderView->bWireframe = true;
 
         // Create UI desktop
         UIDesktop* desktop = UINew(UIDesktop);
@@ -175,22 +181,6 @@ public:
         render.SetAmbient(0.1f);
 
         CreateScene();
-
-        //auto& resourceMngr = sGetResourceManager();
-
-        //if (auto skybox = spectator->FindChildren(StringID("Skybox")))
-        //{
-        //    if (auto skyboxMesh = skybox->GetComponent<DynamicMeshComponent>())
-        //    {
-        //        Ref<Material> skyboxMaterial = MakeRef<Material>("skybox");
-        //        auto materialResource = resourceMngr.GetResource<MaterialResource>("/Root/default/materials/compiled/skybox.mat");
-
-        //        skyboxMaterial->SetResource(materialResource);
-        //        skyboxMaterial->SetTexture(0, m_Level.GetSkyboxTexture());
-
-        //        skyboxMesh->SetMaterial(skyboxMaterial);
-        //    }
-        //}
     }
 
     void Deinitialize()
@@ -204,13 +194,14 @@ public:
         auto& materialMngr = sGetMaterialManager();
 
         materialMngr.LoadLibrary("/Root/default/materials/default.mlib");
+        materialMngr.LoadLibrary("/Root/materials/common.mlib");
 
         // List of resources used in scene
         ResourceID sceneResources[] = {
             resourceMngr.GetResource<MeshResource>("/Root/default/box.mesh"),
-            resourceMngr.GetResource<MeshResource>("/Root/default/skybox.mesh"),
-            resourceMngr.GetResource<MaterialResource>("/Root/default/materials/compiled/skybox.mat"),
-            resourceMngr.GetResource<MeshResource>("/Root/default/plane_xz.mesh"),
+            resourceMngr.GetResource<MaterialResource>("/Root/materials/compiled/sky.mat"),
+            resourceMngr.GetResource<MaterialResource>("/Root/materials/compiled/wall.mat"),
+            resourceMngr.GetResource<MaterialResource>("/Root/materials/compiled/shadow_caster.mat"),
             resourceMngr.GetResource<MaterialResource>("/Root/default/materials/compiled/default.mat"),
             resourceMngr.GetResource<TextureResource>("/Root/grid8.webp")
         };
@@ -225,9 +216,6 @@ public:
 
     GameObject* CreateSpectator(Float3 const& position, Quat const& rotation)
     {
-        auto& resourceMngr = sGetResourceManager();
-        auto& materialMngr = sGetMaterialManager();
-
         GameObject* spectator;
 
         GameObjectDesc desc;
@@ -240,26 +228,6 @@ public:
         spectator->CreateComponent<SpectatorComponent>();
         spectator->CreateComponent<CameraComponent>();
 
-        // Create skybox attached to camera
-        {
-            desc = {};
-            desc.Name.FromString("Skybox");
-            desc.Parent = spectator->GetHandle();
-            desc.IsDynamic = true;
-            desc.AbsoluteRotation = true;
-            GameObject* skybox;
-            m_World->CreateObject(desc, skybox);
-
-            DynamicMeshComponent* mesh;
-            skybox->CreateComponent(mesh);
-            mesh->SetLocalBoundingBox({{-0.5f,-0.5f,-0.5f},{0.5f,0.5f,0.5f}});
-
-            mesh->SetMesh(resourceMngr.GetResource<MeshResource>("/Root/default/skybox.mesh"));
-            mesh->SetMaterial(materialMngr.TryGet("skybox"));
-
-            mesh->SetVisibilityLayer(1);
-        }
-
         return spectator;
     }
 
@@ -270,7 +238,7 @@ public:
 
     void CreateScene()
     {
-        m_Level.Load(MakePath(demo_gamelevel.GetString()));
+        m_Level.Load(m_World, MakePath(demo_gamelevel.GetString()));
 
         // Spawn directional light
         {
@@ -289,24 +257,6 @@ public:
             dirlight->SetShadowCascadeResolution(2048);
             dirlight->SetShadowCascadeOffset(0.0f);
             dirlight->SetShadowCascadeSplitLambda(0.8f);
-        }
-
-        // Spawn ground
-        {
-            static MeshHandle groundMesh = sGetResourceManager().GetResource<MeshResource>("/Root/default/box.mesh");
-
-            GameObjectDesc desc;
-
-            GameObject* ground;
-            m_World->CreateObject(desc, ground);
-
-            StaticMeshComponent* groundModel;
-            ground->CreateComponent(groundModel);
-
-            groundModel->SetMesh(groundMesh);
-            groundModel->SetMaterial(sGetMaterialManager().TryGet("grid8"));
-            groundModel->SetCastShadow(false);
-            groundModel->SetLocalBoundingBox({Float3(-0.5f), Float3(0.5f)});
         }
     }
 
