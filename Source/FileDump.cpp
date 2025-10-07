@@ -49,10 +49,9 @@ void DumpUnknownBytes(File& file, int bytesCount)
     {
         for (uint8_t b : bytes)
         {
-            LOG("{}: {} {}\n",
+            LOG("{}: {}\n",
                 Core::ToHexString(position++, LeadingZeros),
-                Core::ToHexString(b, LeadingZeros),
-                char(b));
+                Core::ToHexString(b, LeadingZeros));
         }
     }
 }

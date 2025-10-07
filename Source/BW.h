@@ -37,7 +37,7 @@ using namespace Hk;
 class BladeWorld
 {
 public:
-    enum FACE_TYPE
+    enum FACE_TYPE : int32_t
     {
         FT_OPAQUE           = 0x00001B59,    // 7001 Face without holes/portals
         FT_TRANSPARENT      = 0x00001B5A,    // 7002 Transparent wall (hole/portal)
@@ -46,126 +46,141 @@ public:
         FT_SKYDOME          = 0x00001B5D     // 7005 Sky
     };
 
-    enum NODE_TYPE
+    enum NODE_TYPE : int32_t
     {
-        NT_NODE       = 0x00001F41,    // 8001
-        NT_TEXINFO    = 0x00001F42,    // 8002
-        NT_LEAF       = 0x00001F43     // 8003
+        NT_NODE             = 0x00001F41,    // 8001
+        NT_TEXINFO          = 0x00001F42,    // 8002
+        NT_LEAF             = 0x00001F43     // 8003
+    };
+
+    enum LIGHT_TYPE : int32_t
+    {
+        LT_POINT            = 15001,
+        LT_DIRECTIONAL      = 15002
     };
 
     struct AtmosphereEntry
     {
-        String  Name;
-        byte    Color[3];
-        float   Intensity;
+        String              Name;
+        byte                Color[3];
+        float               Opacity;
     };
 
     struct LeafIndices
     {
-        uint32_t UnknownIndex;
-        Vector<uint32_t> Indices;
+        uint32_t            UnknownIndex;
+        Vector<uint32_t>    Indices;
     };
 
     struct BSPNode
     {
-        int32_t Type;
+        NODE_TYPE           Type;
 
-        BSPNode* Children[2];  // nullptr for leafs
+        BSPNode*            Children[2];  // nullptr for leafs
 
         // Only for nodes
-        int   PlaneNum;
+        int32_t             PlaneNum;
 
         // Only for NT_TEXINFO
-        uint64_t UnknownSignature;
-        int TextureNum = 0;
-        Double3 TexCoordAxis[2];
-        float TexCoordOffset[2];
+        uint64_t            UnknownSignature;
+        int32_t             TextureNum = 0;
+        Double3             TexCoordAxis[2];
+        float               TexCoordOffset[2];
 
         // Only for leafs
         Vector<LeafIndices> Unknown;
-
-        // Leaf triangles
-        //Vector<Double3> Vertices;
-        //Vector<unsigned int> Indices;
     };
 
     struct Face
     {
-        int Type;
-        int PlaneNum;
-        uint64_t UnknownSignature;
-        int TextureNum = 0;
-        Double3 TexCoordAxis[2];
-        float TexCoordOffset[2];
-        //bool CastShadows;
+        FACE_TYPE           Type;
+        int32_t             PlaneNum;
+        uint64_t            UnknownSignature;
+        int32_t             TextureNum = 0;
+        Double3             TexCoordAxis[2];
+        float               TexCoordOffset[2];
 
-        Vector<uint32_t> Winding;
-        Vector<Vector<uint32_t>> Holes;
+        Vector<uint32_t>            Winding;
+        Vector<Vector<uint32_t>>    Holes;
 
-        // result mesh
-        //Vector<Double3> Vertices;
-        //Vector<unsigned int> Indices;
+        int32_t             SectorIndex;
 
-        int SectorIndex;
-
-        //Vector<Face*> SubFaces;
-
-        BSPNode* pRoot = nullptr;
+        BSPNode*            pRoot = nullptr;
     };
 
     struct Portal
     {
-        //Face* pFace;
-        int32_t ToSector;
-        //Vector<Double3> Winding;
-
-        // Some planes. What they mean?
-        Vector<PlaneD> Planes;
-
-        //bool Marked;
+        //int32_t           FaceNum;
+        int32_t             ToSector;
+        Vector<PlaneD>      TangentPlanes;
     };
 
     struct Sector
     {
+        int32_t             AtmosphereNum;
+
         // TODO: We can use this for color grading or light manipulation within the sector
-        byte AmbientColor[3];
-        float AmbientIntensity;
+        uint8_t             AmbientColor[3];
+        float               AmbientIntensity;
+        float               AmbientUnknown;
 
-        Float3 LightDir;
+        uint8_t             IlluminationColor[3];
+        float               IlluminationIntensity;
+        float               IllumintationUnknown;
+        Double3             IllumintationVector;
 
-        uint32_t FirstFace;
-        uint32_t FaceCount;
+        uint32_t            FirstFace;
+        uint32_t            FaceCount;
 
-        Vector<int> Portals;
+        uint32_t            FirstPortal;
+        uint32_t            PortalCount;
 
-        //BvAxisAlignedBox Bounds;
-        //Float3 Centroid;
+        int32_t             Group;
     };
 
-public:
-    bool Load(StringView name);
+    struct Light
+    {
+        LIGHT_TYPE          Type;
+
+        // Common properties
+        uint8_t             Color[3];
+        float               Intensity;
+        float               Unknown;
+
+        // for LT_POINT
+        Double3             Position;
+        int32_t             Sector;
+
+        // for LT_DIRECTIONAL
+        Double3             Direction;
+        Vector<int32_t>     Sectors;
+    };
+
+    bool                    Load(StringView name);
+
+    void                    Clear();
 
 private:
-    bool ReadSector(File& file, uint32_t sectorIndex);
-    BSPNode* AllocateBSPNode();
-    void ReadFace(File& file, Face* face);
-    void ReadOpaqueFace(File& file, Face* face);
-    void ReadTransparentFace(File& file, Face* face);
-    void ReadSinglePortalFace(File& file, Face* face);
-    void ReadMultiplePortalsFace(File& file, Face* face);
-    void ReadSkydomeFace(File& file, Face* face);
-    BSPNode* ReadBSPNode_r(File& file, Face* face);
-    int ReadPlane(File& file);
-    int ReadTextureName(File& file);
-    void ReadIndices(File& file, Vector<uint32_t>& indices);
+    bool                    ReadSector(File& file, uint32_t sectorIndex);
+    void                    ReadFace(File& file, Face* face);
+    void                    ReadOpaqueFace(File& file, Face* face);
+    void                    ReadTransparentFace(File& file, Face* face);
+    void                    ReadSinglePortalFace(File& file, Face* face);
+    void                    ReadMultiplePortalsFace(File& file, Face* face);
+    void                    ReadSkydomeFace(File& file, Face* face);
+    BSPNode*                ReadBSPNode_r(File& file, Face* face);
+    int32_t                 ReadPlane(File& file);
+    int32_t                 ReadTextureName(File& file);
+    void                    ReadIndices(File& file, Vector<uint32_t>& indices);
 
 public:
-    Vector<AtmosphereEntry> m_Atmospheres;
-    Vector<Double3> m_Vertices;    
-    Vector<Sector> m_Sectors;
-    Vector<Face> m_Faces;
-    Vector<Portal> m_Portals;
-    Vector<UniqueRef<BSPNode>> m_BSPNodes;
-    Vector<PlaneD> m_Planes;
-    Vector<String> m_TextureNames;
+    Vector<AtmosphereEntry>     m_Atmospheres;
+    Vector<Double3>             m_Vertices;
+    Vector<Sector>              m_Sectors;
+    Vector<Face>                m_Faces;
+    Vector<Portal>              m_Portals;
+    Vector<UniqueRef<BSPNode>>  m_BSPNodes;
+    Vector<PlaneD>              m_Planes;
+    Vector<String>              m_TextureNames;
+    Vector<Light>               m_Lights;
 };

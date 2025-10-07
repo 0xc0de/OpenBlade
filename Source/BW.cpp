@@ -33,6 +33,8 @@ using namespace Hk;
 
 bool BladeWorld::Load(StringView fileName)
 {
+    Clear();
+
     File file = File::sOpenRead(fileName);
     if (!file)
         return false;
@@ -42,7 +44,7 @@ bool BladeWorld::Load(StringView fileName)
     {
         atmo.Name = file.ReadString();
         file.Read(&atmo.Color[0], 3);
-        atmo.Intensity = file.ReadFloat();
+        atmo.Opacity = file.ReadFloat();
     }
 
     m_Vertices.Resize(file.ReadInt32());
@@ -63,7 +65,61 @@ bool BladeWorld::Load(StringView fileName)
             break;
         }
     }
+
+    m_Lights.Resize(file.ReadInt32());
+    for (auto& light : m_Lights)
+    {
+        light.Type = static_cast<LIGHT_TYPE>(file.ReadInt32());
+
+        file.Read(light.Color, 3);
+        light.Intensity = file.ReadFloat();
+        light.Unknown = file.ReadFloat();
+
+        switch (light.Type)
+        {
+            case LT_POINT:
+                light.Position = file.ReadObject<Double3>();
+                light.Sector = file.ReadInt32();
+                break;
+            case LT_DIRECTIONAL:
+                file.SeekCur(36);
+                light.Direction = file.ReadObject<Double3>();
+                light.Sectors.Resize(file.ReadInt32());
+                for (int32_t& sectorIndex : light.Sectors)
+                    sectorIndex = file.ReadInt32();
+                break;
+            default:
+                HK_ASSERT(0);
+                break;
+        }
+    }
+
+    file.ReadObject<Double3>();
+    file.ReadObject<Double3>();
+
+    for (auto& sector : m_Sectors)
+        sector.Group = file.ReadInt32();
+
+    SetDumpLog(false);
+    int32_t strCount = file.ReadInt32();
+    for (int32_t i = 0; i < strCount; ++i)
+        DumpString(file);
+    SetDumpLog(true);
+
     return true;
+}
+
+void BladeWorld::Clear()
+{
+    m_Atmospheres.Clear();
+    m_Vertices.Clear();
+    m_Sectors.Clear();
+    m_Faces.Clear();
+    m_Portals.Clear();
+    m_BSPNodes.Clear();
+    m_Planes.Clear();
+    m_TextureNames.Clear();
+    m_Lights.Clear();
 }
 
 bool BladeWorld::ReadSector(File& file, uint32_t sectorIndex)
@@ -72,75 +128,42 @@ bool BladeWorld::ReadSector(File& file, uint32_t sectorIndex)
 
     SetDumpLog(true);
 
-    DumpFileOffset(file);
+    //LOG("-------Sector-------\n");
+    //DumpFileOffset(file);
 
-    String unknownName = file.ReadString();
+    sector.AtmosphereNum = [this](File& file) -> int32_t
+        {
+            String name = file.ReadString();
+            for (int32_t i = 0, count = m_Atmospheres.Size(); i < count; ++i)
+            {
+                if (!m_Atmospheres[i].Name.Icmp(name))
+                    return i;
+            }
+            return -1;
+        }(file);
 
-    LOG("Loading sector: {}\n", unknownName);
-
-    file.Read(&sector.AmbientColor[0], 3);
+    file.Read(sector.AmbientColor, 3);
     sector.AmbientIntensity = file.ReadFloat();
+    sector.AmbientUnknown = file.ReadFloat();
 
     SetDumpLog(false);
 
-    DumpFloat(file);
+    for (int i = 0; i < 24; ++i) { if (DumpByte(file) != 0) LOG("not zero\n"); }
+    for (int i = 0; i < 8; ++i) { if (DumpByte(file) != 0xCD) LOG("not CD\n"); }
+    for (int i = 0; i < 4; ++i) { if (DumpByte(file) != 0) LOG("not zero\n"); }
 
-    for (int i = 0; i < 24; i++) {
-        if (DumpByte(file) != 0) {
-            LOG("not zero\n");
-        }
-    }
+    file.Read(sector.IlluminationColor, 3);
+    sector.IlluminationIntensity = file.ReadFloat();
+    sector.IllumintationUnknown = file.ReadFloat();
 
-    for (int i = 0; i < 8; i++) {
-        if (DumpByte(file) != 0xCD) {
-            LOG("not CD\n");
-        }
-    }
-
-    for (int i = 0; i < 4; i++) {
-        if (DumpByte(file) != 0) {
-            LOG("not zero\n");
-        }
-    }
-
-    byte r, g, b;
-    r = DumpByte(file);
-    g = DumpByte(file);
-    b = DumpByte(file);
-
-    LOG("RGB: {} {} {}\n", r, g, b);
-
-    DumpFloat(file);
-    DumpFloat(file);
-
-    for (int i = 0; i < 24; i++)
-    {
-        if (DumpByte(file) != 0)
-            LOG("not zero\n");
-    }
-
-    for (int i = 0; i < 8; i++)
-    {
-        if (DumpByte(file) != 0xCD)
-            LOG("not CD\n");
-    }
-
-    for (int i = 0; i < 4; i++)
-    {
-        if (DumpByte(file) != 0)
-            LOG("not zero\n");
-    }
+    for (int i = 0; i < 24; ++i) { if (DumpByte(file) != 0) LOG("not zero\n"); }
+    for (int i = 0; i < 8; ++i) { if (DumpByte(file) != 0xCD) LOG("not CD\n"); }
+    for (int i = 0; i < 4; ++i) { if (DumpByte(file) != 0) LOG("not zero\n"); }
 
     // Light direction?
-    sector.LightDir.X = DumpDouble(file);
-    sector.LightDir.Y = -DumpDouble(file);
-    sector.LightDir.Z = -DumpDouble(file);
-    sector.LightDir.NormalizeSelf();
-
-    SetDumpLog(true);
+    sector.IllumintationVector = file.ReadObject<Double3>();
 
     int32_t faceCount = file.ReadInt32();
-
     if (faceCount < 4 || faceCount > 100)
     {
         LOG("WARNING: FILE READ ERROR.. SOMETHING GO WRONG!\n");
@@ -151,45 +174,41 @@ bool BladeWorld::ReadSector(File& file, uint32_t sectorIndex)
     sector.FirstFace = m_Faces.Size();
     sector.FaceCount = faceCount;
 
-    for (int faceIndex = 0; faceIndex < faceCount; ++faceIndex)
+    sector.FirstPortal = m_Portals.Size();
+
+    SetDumpLog(true);
+
+    for (int32_t faceIndex = 0; faceIndex < faceCount; ++faceIndex)
     {
         Face& face = m_Faces.EmplaceBack();
         face.SectorIndex = sectorIndex;
         ReadFace(file, &face);
     }
 
-    return true;
-}
+    sector.PortalCount = m_Portals.Size() - sector.FirstPortal;
 
-BladeWorld::BSPNode* BladeWorld::AllocateBSPNode()
-{
-    return m_BSPNodes.EmplaceBack(MakeUnique<BSPNode>()).RawPtr();
+    return true;
 }
 
 void BladeWorld::ReadFace(File& file, Face* face)
 {
-    face->Type = file.ReadInt32();
+    face->Type = static_cast<FACE_TYPE>(file.ReadInt32());
 
     switch (face->Type)
     {
         case FT_OPAQUE:
-            LOG("OpaqueFace\n");
             ReadOpaqueFace(file, face);
             break;
         case FT_TRANSPARENT:
-            LOG("Transparent\n");
             ReadTransparentFace(file, face);
             break;
         case FT_SINGLE_PORTAL:
-            LOG("SinglePortal\n");
             ReadSinglePortalFace(file, face);
             break;
         case FT_MULTIPLE_PORTALS:
-            LOG("MultiplePortals\n");
             ReadMultiplePortalsFace(file, face);
             break;
         case FT_SKYDOME:
-            LOG("Skydome\n");
             ReadSkydomeFace(file, face);
             break;
         default:
@@ -198,19 +217,19 @@ void BladeWorld::ReadFace(File& file, Face* face)
     }
 }
 
-int BladeWorld::ReadPlane(File& file)
+int32_t BladeWorld::ReadPlane(File& file)
 {
     PlaneD plane = file.ReadObject<PlaneD>();
 
-    m_Planes.Add(plane); // TODO: Add if unique
+    m_Planes.Add(plane);
     return m_Planes.Size() - 1;
 }
 
-int BladeWorld::ReadTextureName(File& file)
+int32_t BladeWorld::ReadTextureName(File& file)
 {
     String name = file.ReadString();
 
-    for (int texNum = 0; texNum < m_TextureNames.Size(); ++texNum) {
+    for (int32_t texNum = 0; texNum < m_TextureNames.Size(); ++texNum) {
         if (!m_TextureNames[texNum].Icmp(name))
             return texNum;
     }
@@ -219,7 +238,7 @@ int BladeWorld::ReadTextureName(File& file)
     return m_TextureNames.Size() - 1;
 }
 
-void BladeWorld::ReadIndices(File& file, Vector< unsigned int >& indices)
+void BladeWorld::ReadIndices(File& file, Vector<uint32_t>& indices)
 {
     indices.Resize(file.ReadInt32());
     for (auto& index : indices)
@@ -228,10 +247,8 @@ void BladeWorld::ReadIndices(File& file, Vector< unsigned int >& indices)
 
 void BladeWorld::ReadOpaqueFace(File& file, Face* face)
 {
-    // Face plane
     face->PlaneNum = ReadPlane(file);
 
-    // FIXME: What is it?
     face->UnknownSignature = file.ReadUInt64();
     if (face->UnknownSignature != 3)
         LOG("Face signature {}\n", face->UnknownSignature);
@@ -244,43 +261,28 @@ void BladeWorld::ReadOpaqueFace(File& file, Face* face)
 
     // 8 zero bytes?
     SetDumpLog(false);
-    for (int k = 0; k < 8; k++)
-    {
-        if (DumpByte(file) != 0)
-            LOG("not zero!\n");
-    }
+    for (int i = 0; i < 8; ++i) { if (DumpByte(file) != 0) LOG("not zero!\n"); }
     SetDumpLog(true);
 
-    // Winding
     ReadIndices(file, face->Winding);
 }
 
 void BladeWorld::ReadTransparentFace(File& file, Face* face)
 {
-    // Face plane
     face->PlaneNum = ReadPlane(file);
 
-    // Winding
     ReadIndices(file, face->Winding);
 
-    int portalNum = m_Portals.Size();
     Portal& portal = m_Portals.EmplaceBack();
 
-    //portal.pFace = face;
+    //portal.FaceNum = face;
     portal.ToSector = file.ReadInt32();
-    //portal->Winding.Resize(face->Indices.Size());
-    //for (int k = 0; k < face->Indices.Size(); k++) {
-    //    portal->Winding[face->Indices.Size() - k - 1] = m_Vertices[face->Indices[k]];
-    //}
 
-    m_Sectors[face->SectorIndex].Portals.Add(portalNum);
+    face->UnknownSignature = file.ReadUInt64();
+    if (face->UnknownSignature != 3)
+        LOG("Face signature {}\n", face->UnknownSignature);
 
-    // FIXME: What is it?
-    SetDumpLog(false);
-    DumpUnknownBytes(file, 8);
-    SetDumpLog(true);
-
-    // FIXME: wtf portal has texture properties? Is this doors?
+    // FIXME: wtf portal has texture properties? Is it doors?
 
     face->TextureNum = ReadTextureName(file);
     face->TexCoordAxis[0] = file.ReadObject<Double3>();
@@ -290,20 +292,14 @@ void BladeWorld::ReadTransparentFace(File& file, Face* face)
 
     // 8 zero bytes?
     SetDumpLog(false);
-    for (int k = 0; k < 8; k++)
-    {
-        if (DumpByte(file) != 0)
-            LOG("not zero!\n");
-    }
+    for (int i = 0; i < 8; ++i) { if (DumpByte(file) != 0) LOG("not zero!\n"); }
     SetDumpLog(true);
 }
 
 void BladeWorld::ReadSinglePortalFace(File& file, Face* face)
 {
-    // Face plane
     face->PlaneNum = ReadPlane(file);
 
-    // FIXME: What is it?
     face->UnknownSignature = file.ReadUInt64();
     if (face->UnknownSignature != 3)
         LOG("Face signature {}\n", face->UnknownSignature);
@@ -316,11 +312,7 @@ void BladeWorld::ReadSinglePortalFace(File& file, Face* face)
 
     // 8 zero bytes?
     SetDumpLog(false);
-    for (int k = 0; k < 8; k++)
-    {
-        if (DumpByte(file) != 0)
-            LOG("not zero!\n");
-    }
+    for (int i = 0; i < 8; ++i) { if (DumpByte(file) != 0) LOG("not zero!\n"); }
     SetDumpLog(true);
 
     // Winding
@@ -330,27 +322,21 @@ void BladeWorld::ReadSinglePortalFace(File& file, Face* face)
     face->Holes.Resize(1);
     ReadIndices(file, face->Holes[0]);
 
-    int portalNum = m_Portals.Size();
     Portal& portal = m_Portals.EmplaceBack();
 
-    //portal.pFace = face;
+    //portal.FaceNum = face;
     portal.ToSector = file.ReadInt32();
-    //portal->Winding = hole;
-
-    m_Sectors[face->SectorIndex].Portals.Add(portalNum);
 
     int32_t count = file.ReadInt32();
-    portal.Planes.Resize(count);
-    for (auto& portalPlane : portal.Planes)
-        portalPlane = file.ReadObject<PlaneD>();
+    portal.TangentPlanes.Resize(count);
+    for (auto& tangentPlane : portal.TangentPlanes)
+        tangentPlane = file.ReadObject<PlaneD>();
 }
 
 void BladeWorld::ReadMultiplePortalsFace(File& file, Face* face)
 {
-    // Face plane
     face->PlaneNum = ReadPlane(file);
 
-    // FIXME: What is it?
     face->UnknownSignature = file.ReadUInt64();
     if (face->UnknownSignature != 3)
         LOG("Face signature {}\n", face->UnknownSignature);
@@ -363,60 +349,25 @@ void BladeWorld::ReadMultiplePortalsFace(File& file, Face* face)
 
     // 8 zero bytes?
     SetDumpLog(false);
-    for (int k = 0; k < 8; k++)
-    {
-        if (DumpByte(file) != 0)
-            LOG("not zero!\n");
-    }
+    for (int i = 0; i < 8; ++i) { if (DumpByte(file) != 0) LOG("not zero!\n"); }
     SetDumpLog(true);
 
     // Winding
     ReadIndices(file, face->Winding);
 
-    //Vector<Double3> winding;
-
-    //winding.Resize(face->Indices.Size());
-    //for (int k = 0; k < face->Indices.Size(); k++)
-    //    winding[k] = m_Vertices[face->Indices[k]];
-    //winding.Reverse();
-
-    //PlaneD facePlane = m_Planes[face->PlaneNum];
-
-    //Vector<ClipperContour> Holes;
-
-    int numHoles = file.ReadInt32();
-    if (numHoles > 0)
+    face->Holes.Resize(file.ReadInt32());
+    for (auto& hole : face->Holes)
     {
-        //PolyClipper HolesUnion;
-        //Vector<Double3> Hole;
+        ReadIndices(file, hole);
 
-        //HolesUnion.SetTransformFromNormal(Float3(facePlane.Normal));
+        Portal& portal = m_Portals.EmplaceBack();
 
-        face->Holes.Resize(numHoles);
+        //portal.FaceNum = face;
+        portal.ToSector = file.ReadInt32();
 
-        for (int c = 0; c < numHoles; c++)
-        {
-            ReadIndices(file, face->Holes[c]);
-
-            //HolesUnion.AddSubj3D(Hole.ToPtr(), Hole.Size());
-
-            int portalNum = m_Portals.Size();
-            Portal& portal = m_Portals.EmplaceBack();
-
-            //portal.pFace = face;
-            portal.ToSector = file.ReadInt32();
-            //portal->Winding = Hole;
-
-            m_Sectors[face->SectorIndex].Portals.Add(portalNum);
-
-            int32_t Count = file.ReadInt32();
-            portal.Planes.Resize(Count);
-            for (int k = 0; k < Count; k++)
-                portal.Planes[k] = file.ReadObject<PlaneD>();
-        }
-
-        // FIXME: Union of hulls may produce inner holes!
-        //HolesUnion.MakeUnion(Holes);
+        portal.TangentPlanes.Resize(file.ReadInt32());
+        for (auto& tangentPlane : portal.TangentPlanes)
+            tangentPlane = file.ReadObject<PlaneD>();
     }
 
     face->pRoot = ReadBSPNode_r(file, face);
@@ -424,29 +375,23 @@ void BladeWorld::ReadMultiplePortalsFace(File& file, Face* face)
 
 BladeWorld::BSPNode* BladeWorld::ReadBSPNode_r(File& file, Face* face)
 {
-    BSPNode* node = AllocateBSPNode();
+    BSPNode* node = m_BSPNodes.EmplaceBack(MakeUnique<BSPNode>()).RawPtr();
 
-    node->Type = file.ReadInt32();
+    node->Type = static_cast<NODE_TYPE>(file.ReadInt32());
 
     if (node->Type == NT_LEAF)
     {
         node->Children[0] = nullptr;
         node->Children[1] = nullptr;
 
-        int Count = DumpInt(file);
-
-        node->Unknown.Resize(Count);
-
-        for (int i = 0; i < Count; i++)
+        node->Unknown.Resize(file.ReadInt32());
+        for (LeafIndices& unknown : node->Unknown)
         {
-            LeafIndices& Unknown = node->Unknown[i];
+            unknown.UnknownIndex = file.ReadInt32();
 
-            Unknown.UnknownIndex = DumpInt(file);
-
-            uint32_t IndicesCount = DumpInt(file);
-            Unknown.Indices.Resize(IndicesCount);
-            for (int j = 0; j < IndicesCount; j++)
-                Unknown.Indices[j] = DumpInt(file);
+            unknown.Indices.Resize(file.ReadInt32());
+            for (uint32_t& index : unknown.Indices)
+                index = file.ReadInt32();
         }
 
         return node;
@@ -468,11 +413,9 @@ BladeWorld::BSPNode* BladeWorld::ReadBSPNode_r(File& file, Face* face)
         node->TexCoordOffset[1] = file.ReadFloat();
 
         // 8 zero bytes?
-        for (int k = 0; k < 8; k++)
-        {
-            if (DumpByte(file) != 0)
-                LOG("not zero!\n");
-        }
+        SetDumpLog(false);
+        for (int i = 0; i < 8; ++i) { if (DumpByte(file) != 0) LOG("not zero!\n"); }
+        SetDumpLog(true);
     }
 
     return node;
@@ -480,9 +423,7 @@ BladeWorld::BSPNode* BladeWorld::ReadBSPNode_r(File& file, Face* face)
 
 void BladeWorld::ReadSkydomeFace(File& file, Face* face)
 {
-    // Face plane
     face->PlaneNum = ReadPlane(file);
 
-    // Winding
     ReadIndices(file, face->Winding);
 }

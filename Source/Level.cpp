@@ -43,15 +43,17 @@ namespace
 {
     enum TEXTURE_TYPE
     {
-        TT_PALETTE = 1,
-        TT_GRAYSCALED = 2,
-        TT_TRUECOLOR = 4
+        TT_PALETTE      = 1,
+        TT_GRAYSCALED   = 2,
+        TT_TRUECOLOR    = 4
     };
 
-    //const Double3 BLADE_COORD_SCALE_D(0.001, -0.001, -0.001);
-    const Float3 BLADE_COORD_SCALE_F(0.001f, -0.001f, -0.001f);
+    HK_NODISCARD Float3 ConvertCoord(Float3 const& coord)
+    {
+        return coord * Float3(0.001f, -0.001f, -0.001f);
+    }
 
-    PlaneD ConvertFacePlane(PlaneD const& plane)
+    HK_NODISCARD PlaneD ConvertPlane(PlaneD const& plane)
     {
         PlaneD newPlane = plane;
         newPlane.Normal.Y = -newPlane.Normal.Y;
@@ -89,6 +91,7 @@ void BladeLevel::Load(World* world, StringView name)
 
     StringView fileLocation = PathUtils::sGetFilePath(name);
     bool skydomeSpecified = false;
+    String bwfile;
 
     UnloadTextures();
     //FreeWorld(); // TODO
@@ -120,7 +123,7 @@ void BladeLevel::Load(World* world, StringView name)
         }
         else if (!Core::Stricmp(key, "World"))
         {
-            LoadWorld(fileName);
+            bwfile = fileName;
         }
         else
         {
@@ -135,22 +138,8 @@ void BladeLevel::Load(World* world, StringView name)
         LoadDome(domeFileName);
     }
 
-    //auto& resourceMngr = GameApplication::sGetResourceManager();
-
-    //// Create materials
-    //m_Materials.Clear();
-    //auto materialResource = resourceMngr.GetResource<MaterialResource>("/Root/default/materials/compiled/default.mat");
-    //for (auto& textureHandle : m_Textures)
-    //{
-    //    auto& textureProxy = resourceMngr.GetProxy(textureHandle);
-
-    //    Ref<Material> material = MakeRef<Material>(textureProxy.GetName());
-
-    //    material->SetResource(materialResource);
-    //    material->SetTexture(0, textureHandle);
-
-    //    m_Materials.Add(std::move(material));
-    //}
+    if (!bwfile.IsEmpty())
+        LoadWorld(bwfile);
 
     GameObject* worldspawn;
 
@@ -161,9 +150,7 @@ void BladeLevel::Load(World* world, StringView name)
 
     WorldspawnComponent* worldspawnComp;
     worldspawn->CreateComponent(worldspawnComp);
-    worldspawnComp->Level = this;    
-
-    //BuildGeometry();
+    worldspawnComp->Level = this;
 }
 
 // Load Skydome from .MMP file
@@ -217,7 +204,8 @@ void BladeLevel::LoadDome(StringView fileName)
         if (!textureResource)
         {
             textureResource = MakeUnique<TextureResource>();
-            textureResource->AllocateCubemap(GameApplication::sGetRenderDevice(), TEXTURE_FORMAT_RGBA16_FLOAT, 1, width);
+            textureResource->AllocateCubemap(GameApplication::sGetRenderDevice(), TEXTURE_FORMAT_SRGBA8_UNORM, 1, width);
+            trueColorData.Reset(width * height * 4);
         }
 
         if (textureResource->GetWidth() != static_cast<uint32_t>(width))
@@ -229,33 +217,22 @@ void BladeLevel::LoadDome(StringView fileName)
         int32_t textureDataSize = size - 12;
         HeapBlob textureData = file.ReadBlob(textureDataSize);
 
-        const float Normalize = 1.0f / 255.0f;
-
-//#define SIMULATE_HDRI
-#ifdef SIMULATE_HDRI
-        const float HDRI_Scale = 4.0f;
-        const float HDRI_Pow = 1.1f;
-#else
-        const float HDRI_Scale = 1.0f;
-        const float HDRI_Pow = 1.0f;
-#endif
-        trueColorData.Reset(sizeof(uint16_t) * width * height * 4);
-        
         switch (type)
         {
             case TT_PALETTE:
             {
                 const uint8_t* data = reinterpret_cast<const uint8_t*>(textureData.GetData());
                 const uint8_t* palette = reinterpret_cast<const uint8_t*>(textureData.GetData()) + width * height;
-                uint16_t* trueColor = reinterpret_cast<uint16_t*>(trueColorData.GetData());
+                uint8_t* trueColor = reinterpret_cast<uint8_t*>(trueColorData.GetData());
 
                 for (int j = 0; j < height; ++j)
                 {
                     for (int k = j * width; k < (j + 1) * width; ++k)
                     {
-                        trueColor[k * 4    ] = f32tof16(Math::Pow(ColorUtils::LinearFromSRGB((palette[data[k] * 3    ] << 2) * Normalize) * HDRI_Scale, HDRI_Pow));
-                        trueColor[k * 4 + 1] = f32tof16(Math::Pow(ColorUtils::LinearFromSRGB((palette[data[k] * 3 + 1] << 2) * Normalize) * HDRI_Scale, HDRI_Pow));
-                        trueColor[k * 4 + 2] = f32tof16(Math::Pow(ColorUtils::LinearFromSRGB((palette[data[k] * 3 + 2] << 2) * Normalize) * HDRI_Scale, HDRI_Pow));
+                        trueColor[k * 4    ] = palette[data[k] * 3    ] << 2;
+                        trueColor[k * 4 + 1] = palette[data[k] * 3 + 1] << 2;
+                        trueColor[k * 4 + 2] = palette[data[k] * 3 + 2] << 2;
+                        trueColor[k * 4 + 3] = 255;
                     }
                 }
                 break;
@@ -263,14 +240,15 @@ void BladeLevel::LoadDome(StringView fileName)
             case TT_GRAYSCALED:
             {
                 const uint8_t* data = reinterpret_cast<const uint8_t*>(textureData.GetData());
-                uint16_t* trueColor = reinterpret_cast<uint16_t*>(trueColorData.GetData());
+                uint8_t* trueColor = reinterpret_cast<uint8_t*>(trueColorData.GetData());
                 for (int j = 0; j < height; ++j)
                 {
                     for (int k = j * width; k < (j + 1) * width; ++k)
                     {
-                        trueColor[k * 4    ] = f32tof16(Math::Pow(ColorUtils::LinearFromSRGB(data[k] * Normalize) * HDRI_Scale, HDRI_Pow));
-                        trueColor[k * 4 + 1] = f32tof16(Math::Pow(ColorUtils::LinearFromSRGB(data[k] * Normalize) * HDRI_Scale, HDRI_Pow));
-                        trueColor[k * 4 + 2] = f32tof16(Math::Pow(ColorUtils::LinearFromSRGB(data[k] * Normalize) * HDRI_Scale, HDRI_Pow));
+                        trueColor[k * 4    ] = data[k];
+                        trueColor[k * 4 + 1] = data[k];
+                        trueColor[k * 4 + 2] = data[k];
+                        trueColor[k * 4 + 3] = 255;
                     }
                 }
                 break;
@@ -278,13 +256,14 @@ void BladeLevel::LoadDome(StringView fileName)
             case TT_TRUECOLOR:
             {
                 const uint8_t* data = reinterpret_cast<const uint8_t*>(textureData.GetData());
-                uint16_t* trueColor = reinterpret_cast<uint16_t*>(trueColorData.GetData());
+                uint8_t* trueColor = reinterpret_cast<uint8_t*>(trueColorData.GetData());
                 int count = width * height * 3;
                 for (int j = 0, k = 0; j < count; j += 3, k += 4)
                 {
-                    trueColor[k    ] = f32tof16(Math::Pow(ColorUtils::LinearFromSRGB(data[j    ] * Normalize) * HDRI_Scale, HDRI_Pow));
-                    trueColor[k + 1] = f32tof16(Math::Pow(ColorUtils::LinearFromSRGB(data[j + 1] * Normalize) * HDRI_Scale, HDRI_Pow));
-                    trueColor[k + 2] = f32tof16(Math::Pow(ColorUtils::LinearFromSRGB(data[j + 2] * Normalize) * HDRI_Scale, HDRI_Pow));
+                    trueColor[k    ] = data[j    ];
+                    trueColor[k + 1] = data[j + 1];
+                    trueColor[k + 2] = data[j + 2];
+                    trueColor[k + 3] = 255;
                 }
                 break;
             }
@@ -295,22 +274,22 @@ void BladeLevel::LoadDome(StringView fileName)
 
         if (faceNum == 2) // Up
         {
-            FlipImageY(trueColorData.GetData(), width, height, sizeof(uint16_t) * 4, sizeof(uint16_t) * width * 4);
+            FlipImageY(trueColorData.GetData(), width, height, 4, width * 4);
 
             m_SkyColorAvg = Float3(0.0f);
             int count = width * height * 4;
-            uint16_t* trueColor = reinterpret_cast<uint16_t*>(trueColorData.GetData());
+            uint8_t* trueColor = reinterpret_cast<uint8_t*>(trueColorData.GetData());
             for (int j = 0; j < count; j += 4)
             {
-                m_SkyColorAvg.X += f16tof32(trueColor[j + 0]);
-                m_SkyColorAvg.Y += f16tof32(trueColor[j + 1]);
-                m_SkyColorAvg.Z += f16tof32(trueColor[j + 2]);
+                m_SkyColorAvg.X += trueColor[j + 0];
+                m_SkyColorAvg.Y += trueColor[j + 1];
+                m_SkyColorAvg.Z += trueColor[j + 2];
             }
-            m_SkyColorAvg /= (width * height);
+            m_SkyColorAvg /= (width * height * 255);
         }
         else
         {
-            FlipImageX(trueColorData.GetData(), width, height, sizeof(uint16_t) * 4, sizeof(uint16_t) * width * 4);
+            FlipImageX(trueColorData.GetData(), width, height, 4, width * 4);
         }
 
         textureResource->WriteDataCubemap(0, 0, width, height, faceNum, 0, trueColorData.GetData());
@@ -503,16 +482,17 @@ namespace
         }
 #endif
     }
-}
 
-Vector<Double3> CreateWinding(Vector<Double3> const& vertices, Vector<uint32_t> const& windingIndices)
-{
-    int windingSize = windingIndices.Size();
+    HK_NODISCARD Vector<Double3> CreateWinding(Vector<Double3> const& vertices, Vector<uint32_t> const& windingIndices)
+    {
+        int windingSize = windingIndices.Size();
 
-    Vector<Double3> winding(windingSize);
-    for (int k = 0; k < windingSize; k++)
-        winding[windingSize - k - 1] = vertices[windingIndices[k]];
-    return winding;
+        Vector<Double3> winding(windingSize);
+        for (int k = 0; k < windingSize; k++)
+            winding[windingSize - k - 1] = vertices[windingIndices[k]];
+        return winding;
+    }
+
 }
 
 void BladeLevel::LoadWorld(StringView fileName)
@@ -540,8 +520,14 @@ void BladeLevel::LoadWorld(StringView fileName)
         m_Materials.Add(std::move(material));
     }
 
+    Vector<Vector<MeshVertex>> vertexBatches(bw.m_TextureNames.Size());
+    Vector<Vector<uint32_t>> indexBatches(bw.m_TextureNames.Size());
+
     Vector<MeshVertex> vertexBuffer;
     Vector<uint32_t> indexBuffer;
+
+    Vector<MeshVertex> skydomeVertexBuffer;
+    Vector<uint32_t> skydomeIndexBuffer;
 
     Vector<MeshVertex> shadowVertexBuffer;
     Vector<uint32_t> shadowIndexBuffer;
@@ -550,8 +536,6 @@ void BladeLevel::LoadWorld(StringView fileName)
     GameObject* object;
     m_World->CreateObject(desc, object);
 
-    int faceIndex = 0;
-
     Ref<Material> skyMaterial = materialMngr.TryGet("skywall");
 
     for (auto const& face : bw.m_Faces)
@@ -559,7 +543,7 @@ void BladeLevel::LoadWorld(StringView fileName)
         vertexBuffer.Clear();
         indexBuffer.Clear();
 
-        PlaneD facePlane = ConvertFacePlane(bw.m_Planes[face.PlaneNum]);
+        PlaneD facePlane = ConvertPlane(bw.m_Planes[face.PlaneNum]);
         Float3 faceNormal = Float3(facePlane.Normal);
 
         if (face.Type == BladeWorld::FT_OPAQUE || face.Type == BladeWorld::FT_SKYDOME)
@@ -583,7 +567,7 @@ void BladeLevel::LoadWorld(StringView fileName)
             CalcTextureCoorinates(face.TexCoordAxis, face.TexCoordOffset, vertexBuffer.ToPtr(), vertexBuffer.Size(), 256, 256);
 
             for (auto& v : vertexBuffer)
-                v.Position *= BLADE_COORD_SCALE_F;
+                v.Position = ConvertCoord(v.Position);
         }
         else if (face.Type == BladeWorld::FT_TRANSPARENT)
         {
@@ -637,7 +621,7 @@ void BladeLevel::LoadWorld(StringView fileName)
             CalcTextureCoorinates(face.TexCoordAxis, face.TexCoordOffset, vertexBuffer.ToPtr(), vertexBuffer.Size(), 256, 256);
 
             for (auto& v : vertexBuffer)
-                v.Position *= BLADE_COORD_SCALE_F;
+                v.Position = ConvertCoord(v.Position);
         }
         else if (face.Type == BladeWorld::FT_MULTIPLE_PORTALS)
         {
@@ -693,7 +677,7 @@ void BladeLevel::LoadWorld(StringView fileName)
             CalcTextureCoorinates(&face, vertexBuffer.ToPtr(), vertexBuffer.Size(), 256, 256);
 
             for (auto& v : vertexBuffer)
-                v.Position *= BLADE_COORD_SCALE_F;
+                v.Position = ConvertCoord(v.Position);
 #endif
 
 
@@ -772,49 +756,63 @@ void BladeLevel::LoadWorld(StringView fileName)
                 shadowIndexBuffer.Add(firstVertex + indexBuffer[i+2]);
             }
         }
-        
-        //if (face.Type == BladeWorld::FT_SKYDOME)
-        //{
-        //    bCastShadows = false;
-        //    bHasSky = true;
-        //}
-        //else if (bw.m_TextureNames[face.TextureNum].IsEmpty())
-        //{
-        //    bCastShadows = false;
-        //}
-        //else if (bw.m_TextureNames[face.TextureNum] == "blanca")
-        //{
-        //    bCastShadows = false;
-        //    bHasSky = true;
-        //}
-        //else if (sector.NumPortals == 0)
-        //{
-        //    bCastShadows = false;
-        //}
-        //else
-        //{
-        //    bCastShadows = true;
-        //}
-#if 1
-        auto surfaceHandle = GameApplication::sGetResourceManager().CreateResource<MeshResource>("surface_" + Core::ToString(faceIndex));
-        faceIndex++;
+
+        if (face.Type == BladeWorld::FT_SKYDOME)
+        {
+            Vector<MeshVertex>& vertexBatch = skydomeVertexBuffer;
+            Vector<uint32_t>& indexBatch = skydomeIndexBuffer;
+
+            uint32_t firstVertex = vertexBatch.Size();
+            vertexBatch.Add(vertexBuffer);
+            for (uint32_t i = 0; i < indexBuffer.Size(); i += 3)
+            {
+                indexBatch.Add(firstVertex + indexBuffer[i  ]);
+                indexBatch.Add(firstVertex + indexBuffer[i+1]);
+                indexBatch.Add(firstVertex + indexBuffer[i+2]);
+            }
+        }
+        else
+        {
+            Vector<MeshVertex>& vertexBatch = vertexBatches[face.TextureNum];
+            Vector<uint32_t>& indexBatch = indexBatches[face.TextureNum];
+
+            uint32_t firstVertex = vertexBatch.Size();
+            vertexBatch.Add(vertexBuffer);
+            for (uint32_t i = 0; i < indexBuffer.Size(); i += 3)
+            {
+                indexBatch.Add(firstVertex + indexBuffer[i  ]);
+                indexBatch.Add(firstVertex + indexBuffer[i+1]);
+                indexBatch.Add(firstVertex + indexBuffer[i+2]);
+            }
+        }
+    }
+
+    for (int textureNum = 0; textureNum < bw.m_TextureNames.Size(); ++textureNum)
+    {
+        const Vector<MeshVertex>& vertexBatch = vertexBatches[textureNum];
+        const Vector<uint32_t>& indexBatch = indexBatches[textureNum];
+
+        if (vertexBatch.IsEmpty())
+            continue;
+
+        auto surfaceHandle = GameApplication::sGetResourceManager().CreateResource<MeshResource>("surface_" + Core::ToString(textureNum));
 
         MeshResource* resource = GameApplication::sGetResourceManager().TryGet(surfaceHandle);
         HK_ASSERT(resource);
 
         BvAxisAlignedBox bounds;
         bounds.Clear();
-        for (auto& v : vertexBuffer)
+        for (auto& v : vertexBatch)
             bounds.AddPoint(v.Position);
 
         MeshAllocateDesc alloc;
         alloc.SurfaceCount = 1;
-        alloc.VertexCount = vertexBuffer.Size();
-        alloc.IndexCount = indexBuffer.Size();
+        alloc.VertexCount = vertexBatch.Size();
+        alloc.IndexCount = indexBatch.Size();
 
         resource->Allocate(alloc);
-        resource->WriteVertexData(vertexBuffer.ToPtr(), vertexBuffer.Size(), 0);
-        resource->WriteIndexData(indexBuffer.ToPtr(), indexBuffer.Size(), 0);
+        resource->WriteVertexData(vertexBatch.ToPtr(), vertexBatch.Size(), 0);
+        resource->WriteIndexData(indexBatch.ToPtr(), indexBatch.Size(), 0);
         resource->SetBoundingBox(bounds);
 
         MeshSurface& meshSurface = resource->LockSurface(0);
@@ -826,15 +824,45 @@ void BladeLevel::LoadWorld(StringView fileName)
         mesh->SetLocalBoundingBox(bounds);
         mesh->SetCastShadow(false);
 
-        if (face.Type == BladeWorld::FT_SKYDOME)
-        {
-            mesh->SetMaterial(skyMaterial);
-        }
-        else
-        {
-            mesh->SetMaterial(FindMaterial(bw.m_TextureNames[face.TextureNum]));
-        }
-#endif
+        mesh->SetMaterial(FindMaterial(bw.m_TextureNames[textureNum]));
+    }
+
+    // Skydome
+    if (!skydomeVertexBuffer.IsEmpty())
+    {
+        const Vector<MeshVertex>& vertexBatch = skydomeVertexBuffer;
+        const Vector<uint32_t>& indexBatch = skydomeIndexBuffer;
+
+        auto surfaceHandle = GameApplication::sGetResourceManager().CreateResource<MeshResource>("surface_skydome");
+
+        MeshResource* resource = GameApplication::sGetResourceManager().TryGet(surfaceHandle);
+        HK_ASSERT(resource);
+
+        BvAxisAlignedBox bounds;
+        bounds.Clear();
+        for (auto& v : vertexBatch)
+            bounds.AddPoint(v.Position);
+
+        MeshAllocateDesc alloc;
+        alloc.SurfaceCount = 1;
+        alloc.VertexCount = vertexBatch.Size();
+        alloc.IndexCount = indexBatch.Size();
+
+        resource->Allocate(alloc);
+        resource->WriteVertexData(vertexBatch.ToPtr(), vertexBatch.Size(), 0);
+        resource->WriteIndexData(indexBatch.ToPtr(), indexBatch.Size(), 0);
+        resource->SetBoundingBox(bounds);
+
+        MeshSurface& meshSurface = resource->LockSurface(0);
+        meshSurface.BoundingBox = bounds;
+
+        StaticMeshComponent* mesh;
+        object->CreateComponent(mesh);
+        mesh->SetMesh(surfaceHandle);
+        mesh->SetLocalBoundingBox(bounds);
+        mesh->SetCastShadow(false);
+
+        mesh->SetMaterial(skyMaterial);
     }
 
     // Create level shadow caster
@@ -1148,7 +1176,7 @@ void BladeLevel::CreateWindings_r(Vector<MeshVertex>& vertexBuffer, Vector<uint3
 #if 0
         PlaneD plane = bw.m_Planes[face.PlaneNum];
 
-        PlaneD facePlane = ConvertFacePlane(plane);
+        PlaneD facePlane = ConvertPlane(plane);
         Float3 faceNormal = Float3(facePlane.Normal);
 
         PolyClipper clipper;
@@ -1199,7 +1227,7 @@ void BladeLevel::CreateWindings_r(Vector<MeshVertex>& vertexBuffer, Vector<uint3
         CalcTextureCoorinates(node->TexCoordAxis, node->TexCoordOffset, vertexBuffer.ToPtr() + firstVertex, resultVertices.Size(), 256, 256);
 
         for (uint32_t i = 0; i < resultVertices.Size(); ++i)
-            vertexBuffer[firstVertex + i].Position *= BLADE_COORD_SCALE_F;
+            vertexBuffer[firstVertex + i].Position = ConvertCoord(vertexBuffer[firstVertex + i].Position);
 
         for (uint32_t index : tempIndexBuffer)
             indexBuffer.Add(firstVertex + index);
@@ -1211,7 +1239,7 @@ void BladeLevel::CreateWindings_r(Vector<MeshVertex>& vertexBuffer, Vector<uint3
 #if 1
         PlaneD plane = bw.m_Planes[face.PlaneNum];
 
-        PlaneD facePlane = ConvertFacePlane(plane);
+        PlaneD facePlane = ConvertPlane(plane);
         Float3 faceNormal = Float3(facePlane.Normal);
 
         PolyClipper clipper;
@@ -1269,7 +1297,7 @@ void BladeLevel::CreateWindings_r(Vector<MeshVertex>& vertexBuffer, Vector<uint3
         }
 
         for (uint32_t i = 0; i < resultVertices.Size(); ++i)
-            vertexBuffer[firstVertex + i].Position *= BLADE_COORD_SCALE_F;
+            vertexBuffer[firstVertex + i].Position = ConvertCoord(vertexBuffer[firstVertex + i].Position);
 
         for (uint32_t index : tempIndexBuffer)
             indexBuffer.Add(firstVertex + index);
@@ -1367,249 +1395,6 @@ void BladeLevel::FilterWinding_r(Face* face, BSPNode* node, BSPNode* leaf)
         FilterWinding_r(face, node->Children[1], leaf);
     }
 }
-
-void BladeLevel::BuildGeometry()
-{
-    MeshVertex vertex;
-    int firstVertex;
-
-    firstVertex = 0;
-
-    //ShadowCasterMeshOffset.BaseVertexLocation = 0;
-    //ShadowCasterMeshOffset.StartIndexLocation = 0;
-    //ShadowCasterMeshOffset.IndexCount = 0;
-
-    Vector< int > verticesCounts;
-    verticesCounts.Resize(m_Sectors.Size());
-
-    //Bounds.Clear();
-    //HasSky = false;
-
-    for (int SectorIndex = 0; SectorIndex < m_Sectors.Size(); ++SectorIndex)
-    {
-        Sector& sector = m_Sectors[SectorIndex];
-
-        sector.Bounds.Clear();
-        sector.Centroid = Float3(0);
-
-        verticesCounts[SectorIndex] = 0;
-    }
-
-    //for (int FaceIndex = 0; FaceIndex < Faces.Size(); FaceIndex++) {
-    //    FFace* Face = Faces[FaceIndex];
-    //    FSector& Sector = Sectors[Face->SectorIndex];
-
-    //    if (Face->Type == FT_Skydome) {
-    //        Face->CastShadows = false;
-    //        HasSky = true;
-    //    }
-    //    else if (Face->TextureName.Size() == 0) {
-    //        Face->CastShadows = false;
-    //    }
-    //    else if (Face->TextureName == "blanca") {
-    //        Face->CastShadows = false;
-    //        HasSky = true;
-    //    }
-    //    else if (Sector.Portals.Size() == 0) {
-    //        Face->CastShadows = false;
-    //    }
-    //    else {
-    //        Face->CastShadows = true;
-    //    }
-    //}
-
-    //class FaceSort : public TQuickSort< FFace*, FaceSort > {
-    //public:
-    //    bool operator() (FFace* _First, FFace* _Second) {
-    //        return _First->CastShadows < _Second->CastShadows;
-    //    }
-    //};
-
-    //FaceSort().Sort(Faces.ToPtr(), Faces.Size());
-
-    // Convert planes
-    for (auto& plane : m_Planes)
-        plane = ConvertFacePlane(plane);
-
-    for (int FaceIndex = 0; FaceIndex < m_Faces.Size(); FaceIndex++)
-    {
-        Face* face = m_Faces[FaceIndex];
-        Sector& sector = m_Sectors[face->SectorIndex];
-        int& VerticesCount = verticesCounts[face->SectorIndex];
-
-        if (face->Type == FT_TRANSPARENT /*|| face->Type == FT_MULTIPLE_PORTALS*/)
-            continue;
-
-        if (face->Indices.Size() < 3)
-            continue;
-
-        int subfaceIndex = 0;
-        auto& subfaces = face->SubFaces;
-
-        for (;;)
-        {
-            if (face->Type != FT_MULTIPLE_PORTALS/* && face->Type == FT_SUBFACE*/)
-            {
-            auto& surface = m_Surfaces.EmplaceBack();
-
-            surface.BaseVertexLocation = firstVertex;
-            surface.StartIndexLocation = m_MeshIndices.Size();
-
-            if (face->Vertices.Size() > 0)
-            {
-                for (int v = 0; v < face->Vertices.Size(); ++v)
-                {
-                    vertex.Position.X = face->Vertices[v].X;
-                    vertex.Position.Y = face->Vertices[v].Y;
-                    vertex.Position.Z = face->Vertices[v].Z;
-                    vertex.SetNormal(Float3(m_Planes[face->PlaneNum].Normal));
-
-                    m_MeshVertices.Add(vertex);
-                }
-
-                for (int j = 0; j < face->Indices.Size(); ++j)
-                {
-                    m_MeshIndices.Add(/*firstVertex + */face->Indices[j]);
-                }
-
-                surface.IndexCount = face->Indices.Size();
-
-                CalcTextureCoorinates(face, &m_MeshVertices[firstVertex], face->Vertices.Size(), 256, 256);
-
-                for (int v = 0; v < face->Vertices.Size(); ++v)
-                {
-                    MeshVertex& Vert = m_MeshVertices[v + firstVertex];
-
-                    Vert.Position *= BLADE_COORD_SCALE_F;
-
-                    sector.Bounds.AddPoint(Vert.Position);
-                    sector.Centroid += Vert.Position;
-                    VerticesCount++;
-                }
-
-                firstVertex += face->Vertices.Size();
-                surface.VertexCount = face->Vertices.Size();
-
-            }
-            else
-            {
-                for (int j = 0; j < face->Indices.Size(); ++j)
-                {
-                    int Index = face->Indices[j];
-
-                    vertex.Position = Float3(m_Vertices[Index]);
-                    vertex.SetNormal(Float3(m_Planes[face->PlaneNum].Normal));
-
-                    m_MeshVertices.Add(vertex);
-                }
-
-                // triangle fan -> triangles
-                for (int j = 0; j < face->Indices.Size() - 2; ++j)
-                {
-                    m_MeshIndices.Add(/*firstVertex + */0);
-                    m_MeshIndices.Add(/*firstVertex + */face->Indices.Size() - j - 2);
-                    m_MeshIndices.Add(/*firstVertex + */face->Indices.Size() - j - 1);
-                }
-
-                surface.IndexCount = (face->Indices.Size() - 2) * 3;
-
-                CalcTextureCoorinates(face, &m_MeshVertices[firstVertex], face->Indices.Size(), 256, 256);
-
-                for (int v = 0; v < face->Indices.Size(); ++v)
-                {
-                    MeshVertex& Vert = m_MeshVertices[v + firstVertex];
-
-                    Vert.Position *= BLADE_COORD_SCALE_F;
-
-                    sector.Bounds.AddPoint(Vert.Position);
-                    sector.Centroid += Vert.Position;
-                    VerticesCount++;
-                }
-
-                firstVertex += face->Indices.Size();
-                surface.VertexCount = face->Indices.Size();
-            }
-
-            //if (face->CastShadows) {
-            //    if (ShadowCasterMeshOffset.IndexCount == 0) {
-            //        ShadowCasterMeshOffset.StartIndexLocation = surface.StartIndexLocation;
-            //    }
-
-            //    ShadowCasterMeshOffset.IndexCount += surface.IndexCount;
-            //}
-
-            Geometry::CalcTangentSpace(m_MeshVertices.ToPtr() + surface.BaseVertexLocation,
-                m_MeshIndices.ToPtr() + surface.StartIndexLocation, surface.IndexCount);
-
-            m_MeshFaces.Add(face);
-
-            }
-
-            if (subfaceIndex == 0)
-            {
-                if (subfaces.IsEmpty())
-                    break;
-            }
-            else
-            {
-                if (subfaceIndex == subfaces.Size())
-                    break;
-
-            }
-            face = subfaces[subfaceIndex++];
-        }
-    }
-
-    for (int sectorIndex = 0; sectorIndex < m_Sectors.Size(); ++sectorIndex)
-    {
-        m_Sectors[sectorIndex].Centroid *= 1.0f / verticesCounts[sectorIndex];
-
-        //Bounds.AddAABB(m_Sectors[sectorIndex].Bounds);
-    }
-
-
-    //auto& materialMngr = GameApplication::sGetMaterialManager();
-    
-        GameObjectDesc desc;
-        GameObject* object;
-        m_World->CreateObject(desc, object);
-
-        for (int surfaceNum = 0; surfaceNum < m_Surfaces.Size(); ++surfaceNum)
-        {
-            //HK_ASSERT(m_MeshFaces[surfaceNum]->Type == FT_SUBFACE);
-
-            int surfaceIndex = surfaceNum;
-            auto& surface = m_Surfaces[surfaceIndex];
-            auto surfaceHandle = GameApplication::sGetResourceManager().CreateResource<MeshResource>("surface_" + Core::ToString(surfaceIndex));
-
-            MeshResource* resource = GameApplication::sGetResourceManager().TryGet(surfaceHandle);
-            HK_ASSERT(resource);
-
-            BvAxisAlignedBox bounds;
-            bounds.Clear();
-            for (int v = 0; v < surface.VertexCount; ++v)
-                bounds.AddPoint(m_MeshVertices[surface.BaseVertexLocation + v].Position);
-
-            MeshAllocateDesc alloc;
-            alloc.SurfaceCount = 1;
-            alloc.VertexCount = surface.VertexCount;
-            alloc.IndexCount = surface.IndexCount;
-
-            resource->Allocate(alloc);
-            resource->WriteVertexData(&m_MeshVertices[surface.BaseVertexLocation], surface.VertexCount, 0);
-            resource->WriteIndexData(&m_MeshIndices[surface.StartIndexLocation], surface.IndexCount, 0);
-            resource->SetBoundingBox(bounds);
-
-            MeshSurface& meshSurface = resource->LockSurface(0);
-            meshSurface.BoundingBox = bounds;
-
-            StaticMeshComponent* mesh;
-            object->CreateComponent(mesh);
-            mesh->SetMesh(surfaceHandle);
-            mesh->SetMaterial(FindMaterial(m_TextureNames[m_MeshFaces[surfaceNum]->TextureNum]));
-            mesh->SetLocalBoundingBox(bounds);            
-        }
-}
 #endif
 
 Ref<Material> BladeLevel::FindMaterial(StringView name)
@@ -1638,7 +1423,7 @@ void BladeLevel::DrawDebug(DebugRenderer& renderer)
             contour.Clear();
             for (uint32_t index : bw.m_Faces[sector.FirstFace + faceIndex].Winding)
             {
-                contour.Add(Float3(bw.m_Vertices[index] * BLADE_COORD_SCALE_D));
+                contour.Add(ConvertCoord(Float3(bw.m_Vertices[index])));
             }
 
             renderer.SetColor(Color4::sBlue());
