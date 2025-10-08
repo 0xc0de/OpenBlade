@@ -28,9 +28,9 @@ SOFTWARE.
 
 #pragma once
 
-#include <Hork/Runtime/World/World.h>
 #include <Hork/Geometry/BV/BvAxisAlignedBox.h>
 #include <Hork/Math/Plane.h>
+#include <Hork/Core/Containers/Vector.h>
 
 using namespace Hk;
 
@@ -126,8 +126,8 @@ public:
 
         uint8_t             IlluminationColor[3];
         float               IlluminationIntensity;
-        float               IllumintationUnknown;
-        Double3             IllumintationVector;
+        float               IlluminationUnknown;
+        Double3             IlluminationVector;
 
         uint32_t            FirstFace;
         uint32_t            FaceCount;

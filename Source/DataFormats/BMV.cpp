@@ -26,39 +26,44 @@ SOFTWARE.
 
 */
 
-#pragma once
-
-#include <Hork/Resources/Resource_Texture.h>
-#include <Hork/Runtime/World/World.h>
-#include <Hork/Geometry/BV/BvAxisAlignedBox.h>
-#include <Hork/Math/Plane.h>
-#include <Hork/Geometry/PolyClipper.h>
-#include <Hork/Geometry/VertexFormat.h>
-#include <Hork/Runtime/Materials/Material.h>
-#include "DataFormats/BW.h"
+#include "BMV.h"
+#include <Hork/Core/IO.h>
 
 using namespace Hk;
 
-class BladeLevel
+void BladeAnimation::Load(StringView fileName)
 {
-public:
-    void Load(World* world, StringView name);
+    Clear();
 
-    void DrawDebug(DebugRenderer& renderer);
+    File f = File::sOpenRead(fileName);
+    if (!f)
+        return;
 
-private:
-    void LoadDome(StringView fileName);
-    void LoadTextures(StringView fileName);
-    void UnloadTextures();
-    void LoadWorld(StringView fileName);
-    void CreateWindings_r(Vector<MeshVertex>& vertexBuffer, Vector<uint32_t>& indexBuffer,
-        BladeWorld::Face const& face, Vector<Double3> const& winding, BladeWorld::BSPNode const* node, BladeWorld::BSPNode const* texInfo);
-    Ref<Material> FindMaterial(StringView name);
+    String name = f.ReadString();
 
-    World* m_World;
-    Float3 m_SkyColorAvg;
-    Vector<TextureHandle> m_Textures;    
-    Vector<Ref<Material>> m_Materials;
+    Nodes.Resize(f.ReadInt32());
+    for (auto& node : Nodes)
+    {
+        node.Keyframes.Resize(f.ReadInt32());
 
-    BladeWorld bw;
-};
+        for (auto& q : node.Keyframes)
+        {
+            q.W = f.ReadFloat();
+            q.X = f.ReadFloat();
+            q.Y = f.ReadFloat();
+            q.Z = f.ReadFloat();
+        }
+    }
+
+    Keyframes.Resize(f.ReadInt32());
+    for (auto& position : Keyframes)
+    {
+        position = f.ReadObject<Double3>();
+    }
+}
+
+void BladeAnimation::Clear()
+{
+    Nodes.Clear();
+    Keyframes.Clear();
+}

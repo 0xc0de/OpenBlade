@@ -26,39 +26,40 @@ SOFTWARE.
 
 */
 
-#pragma once
-
-#include <Hork/Resources/Resource_Texture.h>
-#include <Hork/Runtime/World/World.h>
-#include <Hork/Geometry/BV/BvAxisAlignedBox.h>
-#include <Hork/Math/Plane.h>
-#include <Hork/Geometry/PolyClipper.h>
-#include <Hork/Geometry/VertexFormat.h>
-#include <Hork/Runtime/Materials/Material.h>
-#include "DataFormats/BW.h"
+#include "CSV.h"
+#include <Hork/Core/IO.h>
 
 using namespace Hk;
 
-class BladeLevel
+void BladeCSV::Load(StringView fileName)
 {
-public:
-    void Load(World* world, StringView name);
+    char str[256];
+    char model[256];
+    char name[256];
+    char nature[256];
 
-    void DrawDebug(DebugRenderer& renderer);
+    Entries.Clear();
 
-private:
-    void LoadDome(StringView fileName);
-    void LoadTextures(StringView fileName);
-    void UnloadTextures();
-    void LoadWorld(StringView fileName);
-    void CreateWindings_r(Vector<MeshVertex>& vertexBuffer, Vector<uint32_t>& indexBuffer,
-        BladeWorld::Face const& face, Vector<Double3> const& winding, BladeWorld::BSPNode const* node, BladeWorld::BSPNode const* texInfo);
-    Ref<Material> FindMaterial(StringView name);
+    File f = File::sOpenRead(fileName);
+    if (!f)
+        return;
 
-    World* m_World;
-    Float3 m_SkyColorAvg;
-    Vector<TextureHandle> m_Textures;    
-    Vector<Ref<Material>> m_Materials;
+    while (f.Gets(str, sizeof(str) - 1))
+    { 
+        float unknownValue1;
+        int unknownValue2;
 
-    BladeWorld bw;
-};
+        if (sscanf(str, "%s %s %f %d %s", model, name, &unknownValue1, &unknownValue2, nature) != 5)
+        {
+            LOG("BladeCSV::Load: Not enough parameters\n");
+            continue;
+        }
+
+        auto& entry = Entries.EmplaceBack();
+        entry.Model = model;
+        entry.Name = name;
+        entry.UnknownValue1 = unknownValue1;
+        entry.UnknownValue2 = unknownValue2;
+        entry.Nature = nature;
+    }
+}

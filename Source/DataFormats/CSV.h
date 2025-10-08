@@ -28,37 +28,23 @@ SOFTWARE.
 
 #pragma once
 
-#include <Hork/Resources/Resource_Texture.h>
-#include <Hork/Runtime/World/World.h>
-#include <Hork/Geometry/BV/BvAxisAlignedBox.h>
-#include <Hork/Math/Plane.h>
-#include <Hork/Geometry/PolyClipper.h>
-#include <Hork/Geometry/VertexFormat.h>
-#include <Hork/Runtime/Materials/Material.h>
-#include "DataFormats/BW.h"
+#include <Hork/Core/String.h>
+#include <Hork/Core/Containers/Vector.h>
 
 using namespace Hk;
 
-class BladeLevel
+struct BladeCSV
 {
-public:
-    void Load(World* world, StringView name);
+    struct Entry
+    {
+        String Model;
+        String Name;
+        float UnknownValue1;
+        int UnknownValue2;
+        String Nature;
+    };
 
-    void DrawDebug(DebugRenderer& renderer);
+    Vector<Entry> Entries;
 
-private:
-    void LoadDome(StringView fileName);
-    void LoadTextures(StringView fileName);
-    void UnloadTextures();
-    void LoadWorld(StringView fileName);
-    void CreateWindings_r(Vector<MeshVertex>& vertexBuffer, Vector<uint32_t>& indexBuffer,
-        BladeWorld::Face const& face, Vector<Double3> const& winding, BladeWorld::BSPNode const* node, BladeWorld::BSPNode const* texInfo);
-    Ref<Material> FindMaterial(StringView name);
-
-    World* m_World;
-    Float3 m_SkyColorAvg;
-    Vector<TextureHandle> m_Textures;    
-    Vector<Ref<Material>> m_Materials;
-
-    BladeWorld bw;
+    void Load(StringView fileName);
 };

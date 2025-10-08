@@ -27,7 +27,7 @@ SOFTWARE.
 */
 
 #include "BW.h"
-#include "FileDump.h"
+#include "../Utils/FileDump.h"
 
 using namespace Hk;
 
@@ -154,14 +154,14 @@ bool BladeWorld::ReadSector(File& file, uint32_t sectorIndex)
 
     file.Read(sector.IlluminationColor, 3);
     sector.IlluminationIntensity = file.ReadFloat();
-    sector.IllumintationUnknown = file.ReadFloat();
+    sector.IlluminationUnknown = file.ReadFloat();
 
     for (int i = 0; i < 24; ++i) { if (DumpByte(file) != 0) LOG("not zero\n"); }
     for (int i = 0; i < 8; ++i) { if (DumpByte(file) != 0xCD) LOG("not CD\n"); }
     for (int i = 0; i < 4; ++i) { if (DumpByte(file) != 0) LOG("not zero\n"); }
 
     // Light direction?
-    sector.IllumintationVector = file.ReadObject<Double3>();
+    sector.IlluminationVector = file.ReadObject<Double3>();
 
     int32_t faceCount = file.ReadInt32();
     if (faceCount < 4 || faceCount > 100)

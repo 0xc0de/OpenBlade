@@ -27,8 +27,9 @@ SOFTWARE.
 */
 
 #include "Level.h"
-#include "FileDump.h"
-#include "BW.h"
+#include "Utils/FileDump.h"
+#include "Utils/ConversionUtils.h"
+#include "DataFormats/BW.h"
 
 #include <Hork/Runtime/GameApplication/GameApplication.h>
 #include <Hork/Runtime/World/Modules/Render/Components/MeshComponent.h>
@@ -47,35 +48,7 @@ namespace
         TT_GRAYSCALED   = 2,
         TT_TRUECOLOR    = 4
     };
-
-    HK_NODISCARD Float3 ConvertCoord(Float3 const& coord)
-    {
-        return coord * Float3(0.001f, -0.001f, -0.001f);
-    }
-
-    HK_NODISCARD PlaneD ConvertPlane(PlaneD const& plane)
-    {
-        PlaneD newPlane = plane;
-        newPlane.Normal.Y = -newPlane.Normal.Y;
-        newPlane.Normal.Z = -newPlane.Normal.Z;
-        newPlane.D *= 0.001;
-        return newPlane;
-    }
 }
-
-class WorldspawnComponent : public Component
-{
-public:
-    static constexpr ComponentMode Mode = ComponentMode::Static;
-
-    BladeLevel* Level{};
-    
-    void DrawDebug(DebugRenderer& renderer)
-    {
-        if (Level)
-            Level->DrawDebug(renderer);
-    }
-};
 
 void BladeLevel::Load(World* world, StringView name)
 {
@@ -140,17 +113,6 @@ void BladeLevel::Load(World* world, StringView name)
 
     if (!bwfile.IsEmpty())
         LoadWorld(bwfile);
-
-    GameObject* worldspawn;
-
-    GameObjectDesc desc;
-    desc.Name.FromString("Worldspawn");
-    desc.IsDynamic = false;
-    m_World->CreateObject(desc, worldspawn);
-
-    WorldspawnComponent* worldspawnComp;
-    worldspawn->CreateComponent(worldspawnComp);
-    worldspawnComp->Level = this;
 }
 
 // Load Skydome from .MMP file
@@ -568,6 +530,8 @@ void BladeLevel::LoadWorld(StringView fileName)
 
             for (auto& v : vertexBuffer)
                 v.Position = ConvertCoord(v.Position);
+
+            //Geometry::CalcTangentSpace(vertexBuffer.ToPtr(), indexBuffer.ToPtr(), indexBuffer.Size());
         }
         else if (face.Type == BladeWorld::FT_TRANSPARENT)
         {
@@ -622,6 +586,8 @@ void BladeLevel::LoadWorld(StringView fileName)
 
             for (auto& v : vertexBuffer)
                 v.Position = ConvertCoord(v.Position);
+
+            //Geometry::CalcTangentSpace(vertexBuffer.ToPtr(), indexBuffer.ToPtr(), indexBuffer.Size());
         }
         else if (face.Type == BladeWorld::FT_MULTIPLE_PORTALS)
         {
@@ -678,6 +644,8 @@ void BladeLevel::LoadWorld(StringView fileName)
 
             for (auto& v : vertexBuffer)
                 v.Position = ConvertCoord(v.Position);
+
+            //Geometry::CalcTangentSpace(vertexBuffer.ToPtr(), indexBuffer.ToPtr(), indexBuffer.Size());
 #endif
 
 
@@ -786,6 +754,18 @@ void BladeLevel::LoadWorld(StringView fileName)
             }
         }
     }
+
+    // TODO:
+    // Разбить пространство на кубы, распределить треугольники каждого батча по кубам, получим чанки.
+    // Если треугольник попадает в несколько кубов, то определить его в тот куб, AABB которого будет меньше с учетом этого треугольника.
+    // Далее для каждого куба составить список чанков, AABB которых пересекается с кубом.
+    // Далее сделать препроцесс для проверки какой куб из какого куба будет виден, составить PVS.
+    // При рендере, получаем куб в котором находится камера, извлекаем PVS, из PVS получаем список видимых кубов, рисуем чанки, которые
+    // относятся к этим кубам.
+    // Для динамики, в рантайме определяем к какому кубу относится динамический меш, рисуем в зависимости от PVS.
+
+    // TODO:
+    // Использовать meshoptimizer для оптимизации геометрии
 
     for (int textureNum = 0; textureNum < bw.m_TextureNames.Size(); ++textureNum)
     {
@@ -1229,6 +1209,8 @@ void BladeLevel::CreateWindings_r(Vector<MeshVertex>& vertexBuffer, Vector<uint3
         for (uint32_t i = 0; i < resultVertices.Size(); ++i)
             vertexBuffer[firstVertex + i].Position = ConvertCoord(vertexBuffer[firstVertex + i].Position);
 
+        //Geometry::CalcTangentSpace(vertexBuffer.ToPtr() + firstVertex, tempIndexBuffer.ToPtr(), tempIndexBuffer.Size());
+
         for (uint32_t index : tempIndexBuffer)
             indexBuffer.Add(firstVertex + index);
 
@@ -1301,6 +1283,8 @@ void BladeLevel::CreateWindings_r(Vector<MeshVertex>& vertexBuffer, Vector<uint3
 
         for (uint32_t index : tempIndexBuffer)
             indexBuffer.Add(firstVertex + index);
+
+        //Geometry::CalcTangentSpace(vertexBuffer.ToPtr() + firstVertex, tempIndexBuffer.ToPtr(), tempIndexBuffer.Size());
 
 #endif
         //HK_ASSERT(!winding.IsEmpty());

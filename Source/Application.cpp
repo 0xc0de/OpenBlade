@@ -32,9 +32,14 @@ SOFTWARE.
 #include <Hork/Runtime/World/Modules/Render/Components/DirectionalLightComponent.h>
 #include <Hork/Runtime/World/Modules/Render/RenderInterface.h>
 #include <Hork/Runtime/World/Modules/Input/InputInterface.h>
+#include <Hork/Runtime/World/Modules/Audio/AudioInterface.h>
+#include <Hork/Runtime/World/Modules/Audio/Components/SoundSource.h>
+#include <Hork/Runtime/World/DebugRenderer.h>
+#include <Hork/Resources/Resource_Sound.h>
 #include <Hork/RenderUtils/Utilites.h>
 
 #include "Level.h"
+#include "DataFormats/SF.h"
 
 using namespace Hk;
 
@@ -42,7 +47,7 @@ ConsoleVar demo_gamepath("demo_gamepath"_s, "D:\\Games\\Blade Of Darkness"_s);
 //ConsoleVar demo_gamelevel("demo_gamelevel"_s, "Maps/Mine_M5/mine.lvl"_s);
 ConsoleVar demo_gamelevel("demo_gamelevel"_s, "Maps/Casa/casa.lvl"_s);
 ConsoleVar demo_spectatorMoveSpeed("demo_spectatorMoveSpeed"_s, "10"_s);
-
+ConsoleVar demo_music("demo_music"_s, "Sounds/MAPA2.mp3"_s);
 
 class SpectatorComponent : public Component
 {
@@ -100,11 +105,24 @@ public:
     }
 };
 
+class SampleApplication;
+
+class DebugRendererComponent : public Component
+{
+public:
+    static constexpr ComponentMode Mode = ComponentMode::Static;
+
+    SampleApplication* App{};
+
+    void DrawDebug(DebugRenderer& renderer);
+};
+
 class SampleApplication final : public GameApplication
 {
     World*                      m_World{};
     Ref<WorldRenderView>        m_WorldRenderView;
     BladeLevel                  m_Level;
+    BladeSF                     m_SF;
 
 public:
     SampleApplication(ArgumentPack const& args) :
@@ -180,6 +198,9 @@ public:
         RenderInterface& render = m_World->GetInterface<RenderInterface>();
         render.SetAmbient(0.1f);
 
+        AudioInterface& audio = m_World->GetInterface<AudioInterface>();
+        audio.SetListener(spectator->GetComponentHandle<AudioListenerComponent>());
+
         CreateScene();
     }
 
@@ -227,6 +248,7 @@ public:
 
         spectator->CreateComponent<SpectatorComponent>();
         spectator->CreateComponent<CameraComponent>();
+        spectator->CreateComponent<AudioListenerComponent>();
 
         return spectator;
     }
@@ -239,6 +261,40 @@ public:
     void CreateScene()
     {
         m_Level.Load(m_World, MakePath(demo_gamelevel.GetString()));
+
+        String ghostSectors = demo_gamelevel.GetString();
+        PathUtils::sSetExtensionInplace(ghostSectors, "sf", true);
+        
+        m_SF.Load(MakePath(ghostSectors));
+
+        auto sound = sGetResourceManager().CreateResourceFromFile<SoundResource>("/FS/" + MakePath(demo_music.GetString()));
+
+        {
+            GameObject* musicPlayer;
+            GameObjectDesc desc;
+            desc.Name.FromString("MusicPlayer");
+            desc.IsDynamic = false;
+            m_World->CreateObject(desc, musicPlayer);
+
+            SoundSource* soundSource;
+            musicPlayer->CreateComponent(soundSource);
+            soundSource->SetSourceType(SoundSourceType::Background);
+            soundSource->SetVolume(0.1f);
+            soundSource->PlaySound(sound, 0, 0);
+        }
+
+        {
+            GameObject* debugRenderer;
+
+            GameObjectDesc desc;
+            desc.Name.FromString("DebugRenderer");
+            desc.IsDynamic = false;
+            m_World->CreateObject(desc, debugRenderer);
+
+            DebugRendererComponent* component;
+            debugRenderer->CreateComponent(component);
+            component->App = this;
+        }
 
         // Spawn directional light
         {
@@ -269,7 +325,38 @@ public:
     {
         PostTerminateEvent();
     }
+
+    Vector<Float3> m_TempPoints;
+
+    void DrawDebug(DebugRenderer& renderer)
+    {
+        m_Level.DrawDebug(renderer);
+
+#if 0
+        for (auto& sector : m_SF.GhostSectors)
+        {
+            m_TempPoints.Clear();
+            for (auto& v : sector.Vertices)
+                m_TempPoints.EmplaceBack(v.X, sector.FloorHeight, v.Y);
+            renderer.DrawLine(m_TempPoints, true);
+
+            m_TempPoints.Clear();
+            for (auto& v : sector.Vertices)
+                m_TempPoints.EmplaceBack(v.X, sector.RoofHeight, v.Y);
+            renderer.DrawLine(m_TempPoints, true);
+
+            for (auto& v : sector.Vertices)
+                renderer.DrawLine(Float3(v.X, sector.FloorHeight, v.Y), Float3(v.X, sector.RoofHeight, v.Y));
+        }
+#endif
+    }
 };
+
+void DebugRendererComponent::DrawDebug(DebugRenderer& renderer)
+{
+    if (App)
+        App->DrawDebug(renderer);
+}
 
 using ApplicationClass = SampleApplication;
 #include "Samples/Source/Common/EntryPoint.h"

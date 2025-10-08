@@ -28,37 +28,31 @@ SOFTWARE.
 
 #pragma once
 
-#include <Hork/Resources/Resource_Texture.h>
-#include <Hork/Runtime/World/World.h>
-#include <Hork/Geometry/BV/BvAxisAlignedBox.h>
-#include <Hork/Math/Plane.h>
-#include <Hork/Geometry/PolyClipper.h>
-#include <Hork/Geometry/VertexFormat.h>
-#include <Hork/Runtime/Materials/Material.h>
-#include "DataFormats/BW.h"
+#include <Hork/Core/String.h>
+#include <Hork/Core/Containers/Vector.h>
+#include <Hork/Math/VectorMath.h>
 
 using namespace Hk;
 
-class BladeLevel
+struct BladeSF
 {
-public:
-    void Load(World* world, StringView name);
+    struct GhostSector
+    {
+        String Name;
+        float FloorHeight = 0;
+        float RoofHeight = 0;
+        Vector<Float2> Vertices;
+        String Group;
+        String Sound;
+        float Volume = 0;
+        float VolumeBase = 0;
+        float MinDist = 0;
+        float MaxDist = 0;
+        float MaxVerticalDist = 0;
+        float Scale = 0;
+    };
 
-    void DrawDebug(DebugRenderer& renderer);
+    Vector<GhostSector> GhostSectors;
 
-private:
-    void LoadDome(StringView fileName);
-    void LoadTextures(StringView fileName);
-    void UnloadTextures();
-    void LoadWorld(StringView fileName);
-    void CreateWindings_r(Vector<MeshVertex>& vertexBuffer, Vector<uint32_t>& indexBuffer,
-        BladeWorld::Face const& face, Vector<Double3> const& winding, BladeWorld::BSPNode const* node, BladeWorld::BSPNode const* texInfo);
-    Ref<Material> FindMaterial(StringView name);
-
-    World* m_World;
-    Float3 m_SkyColorAvg;
-    Vector<TextureHandle> m_Textures;    
-    Vector<Ref<Material>> m_Materials;
-
-    BladeWorld bw;
+    void Load(StringView fileName);
 };

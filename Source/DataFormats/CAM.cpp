@@ -26,39 +26,39 @@ SOFTWARE.
 
 */
 
-#pragma once
+#include "CAM.h"
+#include "../Utils/ConversionUtils.h"
 
-#include <Hork/Resources/Resource_Texture.h>
-#include <Hork/Runtime/World/World.h>
-#include <Hork/Geometry/BV/BvAxisAlignedBox.h>
-#include <Hork/Math/Plane.h>
-#include <Hork/Geometry/PolyClipper.h>
-#include <Hork/Geometry/VertexFormat.h>
-#include <Hork/Runtime/Materials/Material.h>
-#include "DataFormats/BW.h"
+#include <Hork/Core/IO.h>
 
 using namespace Hk;
 
-class BladeLevel
+void BladeCAM::Load(StringView fileName)
 {
-public:
-    void Load(World* world, StringView name);
+    Clear();
 
-    void DrawDebug(DebugRenderer& renderer);
+    File f = File::sOpenRead(fileName);
+    if (!f)
+        return;
 
-private:
-    void LoadDome(StringView fileName);
-    void LoadTextures(StringView fileName);
-    void UnloadTextures();
-    void LoadWorld(StringView fileName);
-    void CreateWindings_r(Vector<MeshVertex>& vertexBuffer, Vector<uint32_t>& indexBuffer,
-        BladeWorld::Face const& face, Vector<Double3> const& winding, BladeWorld::BSPNode const* node, BladeWorld::BSPNode const* texInfo);
-    Ref<Material> FindMaterial(StringView name);
+    int32_t frameCount = f.ReadInt32() + 1;
+    Frames.Resize(frameCount);
 
-    World* m_World;
-    Float3 m_SkyColorAvg;
-    Vector<TextureHandle> m_Textures;    
-    Vector<Ref<Material>> m_Materials;
+    Unknown = f.ReadFloat(); // Duration?
 
-    BladeWorld bw;
-};
+    for (auto& frame : Frames)
+    {
+        Float3 axis = ConvertAxis(f.ReadObject<Float3>());
+        float angle = f.ReadFloat();
+        
+        frame.Rotation.FromMatrix((Float3x3::sRotationX(Math::_HALF_PI) * Float3x3::sRotationAroundVector(angle, axis)).Transposed());
+        frame.Position = ConvertCoord(f.ReadObject<Float3>());
+        frame.FOV = f.ReadFloat();
+    }
+}
+
+void BladeCAM::Clear()
+{
+    Frames.Clear();
+    Unknown = 0;
+}
