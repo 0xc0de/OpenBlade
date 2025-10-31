@@ -35,11 +35,15 @@ SOFTWARE.
 #include <Hork/Runtime/World/Modules/Audio/AudioInterface.h>
 #include <Hork/Runtime/World/Modules/Audio/Components/SoundSource.h>
 #include <Hork/Runtime/World/DebugRenderer.h>
-#include <Hork/Resources/Resource_Sound.h>
+#include <Hork/Resources/Sound.h>
 #include <Hork/RenderUtils/Utilites.h>
+#include <Hork/Geometry/TangentSpace.h>
 
 #include "Level.h"
 #include "DataFormats/SF.h"
+#include "DataFormats/BOD.h"
+#include "DataFormats/BMV.h"
+#include "Utils/ConversionUtils.h"
 
 using namespace Hk;
 
@@ -120,7 +124,7 @@ public:
 class SampleApplication final : public GameApplication
 {
     World*                      m_World{};
-    Ref<WorldRenderView>        m_WorldRenderView;
+    IntrusiveRef<WorldRenderView>m_WorldRenderView;
     BladeLevel                  m_Level;
     BladeSF                     m_SF;
 
@@ -132,7 +136,7 @@ public:
     void Initialize()
     {
         // Set input mappings
-        Ref<InputMappings> inputMappings = MakeRef<InputMappings>();
+        IntrusiveRef<InputMappings> inputMappings(new InputMappings);
         inputMappings->MapAxis(PlayerController::_1, "MoveForward", VirtualKey::W, 1.0f);
         inputMappings->MapAxis(PlayerController::_1, "MoveForward", VirtualKey::S, -1.0f);
         inputMappings->MapAxis(PlayerController::_1, "MoveForward", VirtualKey::Up, 1.0f);
@@ -146,10 +150,10 @@ public:
         inputMappings->MapAxis(PlayerController::_1, "TurnRight", VirtualKey::Left, -90.0f);
         inputMappings->MapAxis(PlayerController::_1, "TurnRight", VirtualKey::Right, 90.0f);
 
-        sGetInputSystem().SetInputMappings(inputMappings);
+        sGetInputSystem().SetInputMappings(std::move(inputMappings));
 
         // Set rendering parameters
-        m_WorldRenderView = MakeRef<WorldRenderView>();
+        m_WorldRenderView.Reset(new WorldRenderView);
         m_WorldRenderView->bDrawDebug = true;
         //m_WorldRenderView->bWireframe = true;
 
@@ -196,7 +200,8 @@ public:
         input.SetActive(true);
 
         RenderInterface& render = m_World->GetInterface<RenderInterface>();
-        render.SetAmbient(0.1f);
+        //render.SetAmbient(0.1f);
+        render.SetAmbient(0);
 
         AudioInterface& audio = m_World->GetInterface<AudioInterface>();
         audio.SetListener(spectator->GetComponentHandle<AudioListenerComponent>());
@@ -209,6 +214,9 @@ public:
         DestroyWorld(m_World);
     }
 
+    const uint32_t BATCH_BASE_RESOURCES = 1;
+    Vector<ResourceRef> m_Resources;
+
     void CreateResources()
     {
         auto& resourceMngr = sGetResourceManager();
@@ -217,22 +225,15 @@ public:
         materialMngr.LoadLibrary("/Root/default/materials/default.mlib");
         materialMngr.LoadLibrary("/Root/materials/common.mlib");
 
-        // List of resources used in scene
-        ResourceID sceneResources[] = {
-            resourceMngr.GetResource<MeshResource>("/Root/default/box.mesh"),
-            resourceMngr.GetResource<MaterialResource>("/Root/materials/compiled/sky.mat"),
-            resourceMngr.GetResource<MaterialResource>("/Root/materials/compiled/wall.mat"),
-            resourceMngr.GetResource<MaterialResource>("/Root/materials/compiled/shadow_caster.mat"),
-            resourceMngr.GetResource<MaterialResource>("/Root/default/materials/compiled/default.mat"),
-            resourceMngr.GetResource<TextureResource>("/Root/grid8.webp")
-        };
-
         // Load resources asynchronously
-        ResourceAreaID resources = resourceMngr.CreateResourceArea(sceneResources);
-        resourceMngr.LoadArea(resources);
+        m_Resources.EmplaceBack(resourceMngr.LoadAsync<Mesh>(BATCH_BASE_RESOURCES, "/Root/default/box.mesh"));
+        m_Resources.EmplaceBack(resourceMngr.LoadAsync<Material>(BATCH_BASE_RESOURCES, "/Root/materials/compiled/sky.mat"));
+        m_Resources.EmplaceBack(resourceMngr.LoadAsync<Material>(BATCH_BASE_RESOURCES, "/Root/materials/compiled/wall.mat"));
+        m_Resources.EmplaceBack(resourceMngr.LoadAsync<Material>(BATCH_BASE_RESOURCES, "/Root/materials/compiled/shadow_caster.mat"));
+        m_Resources.EmplaceBack(resourceMngr.LoadAsync<Material>(BATCH_BASE_RESOURCES, "/Root/default/materials/compiled/default.mat"));
+        m_Resources.EmplaceBack(resourceMngr.LoadAsync<Texture>(BATCH_BASE_RESOURCES, "/Root/grid8.webp"));
 
-        // Wait for the resources to load
-        resourceMngr.MainThread_WaitResourceArea(resources);
+        resourceMngr.WaitForBatch(BATCH_BASE_RESOURCES);
     }
 
     GameObject* CreateSpectator(Float3 const& position, Quat const& rotation)
@@ -258,16 +259,205 @@ public:
         return demo_gamepath.GetString() / in;
     }
 
+    BladeModel model;
+    BladeAnimation anim;
+    void LoadAndSpawnModel(StringView fileName, Float3 const& position, Quat const& rotation)
+    {
+        auto& materialMngr = sGetMaterialManager();
+
+        
+        model.Load(fileName);
+
+        // Build mesh
+        Vector<Vector<MeshVertex>> vertexBatches(model.Textures.Size());
+        Vector<Vector<uint32_t>> indexBatches(model.Textures.Size());
+        for (auto& face : model.Faces)
+        {
+            Vector<MeshVertex>& vertexBatch = vertexBatches[face.TextureNum];
+            Vector<uint32_t>& indexBatch = indexBatches[face.TextureNum];
+
+            auto& v0 = model.Vertices[face.Indices[0]];
+            auto& v1 = model.Vertices[face.Indices[1]];
+            auto& v2 = model.Vertices[face.Indices[2]];
+
+            Double3 faceNormal = Math::Cross(v1.Position - v0.Position, v2.Position - v0.Position);//.Normalized();
+
+            for (int i = 0; i < 3; ++i)
+            {
+                auto& v = vertexBatch.EmplaceBack();
+
+                v.Position = ConvertCoord(Float3(model.Vertices[face.Indices[i]].Position));
+                
+#if 0
+                Double3 normal = faceNormal;
+
+                auto& modelVertex = model.Vertices[face.Indices[i]];
+                for (auto& adjacentFaceNum : modelVertex.Faces)
+                {
+                    auto& adjacentFace = model.Faces[adjacentFaceNum];
+                    if (&adjacentFace != &face)
+                    {
+                        if ((face.Group & adjacentFace.Group) != 0)
+                        {
+                            auto& a0 = model.Vertices[adjacentFace.Indices[0]];
+                            auto& a1 = model.Vertices[adjacentFace.Indices[1]];
+                            auto& a2 = model.Vertices[adjacentFace.Indices[2]];
+
+                            Double3 adjacentFaceNormal = Math::Cross(a1.Position - a0.Position, a2.Position - a0.Position);//.Normalized();
+
+                            normal += adjacentFaceNormal;
+                        }
+                    }
+                }
+
+                
+
+                LOG("NORMAL {} FACE NORMAL {}\n", normal, faceNormal);
+
+                if (normal.Length() < 0.001)
+                    normal = faceNormal;//v.SetNormal(ConvertAxis(Float3(model.Vertices[face.Indices[i]].Normal)).Normalized());
+                //else
+                    v.SetNormal(ConvertAxis(Float3(normal).Normalized()));
+#else
+
+                v.SetNormal(ConvertAxis(Float3(model.Vertices[face.Indices[i]].Normal)).Normalized());
+#endif
+
+                v.SetTexCoord(face.TexCoords[i]);
+
+                indexBatch.Add(vertexBatch.Size() - 1); // TODO: use mesh optimizer to generate index buffer for the batch
+            }
+        }
+
+        for (int textureNum = 0, count = model.Textures.Size(); textureNum < count; ++textureNum)
+        {
+            Vector<MeshVertex>& vertexBatch = vertexBatches[textureNum];
+            Vector<uint32_t>& indexBatch = indexBatches[textureNum];
+
+            Geometry::CalcTangentSpace(vertexBatch.ToPtr(), indexBatch.ToPtr(), indexBatch.Size());
+        }
+
+        //for (Vector<MeshVertex>& vertexBatch : vertexBatches)
+        {
+            
+
+            // TODO: use mesh optimizer to optimize vertexBatch
+            //       use mesh optimizer to generate index buffer for the batch
+        }
+
+        GameObjectDesc desc;
+        desc.Position = position;
+        desc.Rotation = rotation;
+        GameObject* object;
+        m_World->CreateObject(desc, object);
+
+        for (int textureNum = 0; textureNum < model.Textures.Size(); ++textureNum)
+        {
+            const Vector<MeshVertex>& vertexBatch = vertexBatches[textureNum];
+            const Vector<uint32_t>& indexBatch = indexBatches[textureNum];
+
+            if (vertexBatch.IsEmpty())
+                continue;
+
+            MeshRef surface(new Mesh);
+
+            BvAxisAlignedBox bounds;
+            bounds.Clear();
+            for (auto& v : vertexBatch)
+                bounds.AddPoint(v.Position);
+
+            MeshAllocateDesc alloc;
+            alloc.SurfaceCount = 1;
+            alloc.VertexCount = vertexBatch.Size();
+            alloc.IndexCount = indexBatch.Size();
+
+            surface->Allocate(alloc);
+            surface->WriteVertexData(vertexBatch.ToPtr(), vertexBatch.Size(), 0);
+            surface->WriteIndexData(indexBatch.ToPtr(), indexBatch.Size(), 0);
+            surface->SetBoundingBox(bounds);
+
+            MeshSurface& meshSurface = surface->LockSurface(0);
+            meshSurface.BoundingBox = bounds;
+
+            StaticMeshComponent* mesh;
+            object->CreateComponent(mesh);
+            mesh->SetMesh(surface);
+            mesh->SetMaterial(materialMngr.FindMaterial("grid8")); // TODO
+            mesh->SetMaterial(m_Level.FindMaterial(model.Textures[textureNum]));
+            mesh->SetCastShadow(false);
+            mesh->SetLocalBoundingBox(bounds);
+        }
+    }
+
+    
+
     void CreateScene()
     {
+        m_Level.LoadTextures( MakePath( "3DObjs/3dObjs.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/bolarayos.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/CilindroMagico.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/CilindroMagico2.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/CilindroMagico3.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/conos.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/dalblade.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/esferagemaazul.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/esferagemaroja.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/esferagemaverde.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/esferanegra.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/esferaorbital.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/espectro.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/firering.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/genericos.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/halfmoontrail.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/luzdivina.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/magicshield.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/nube.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/objetos_p.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/ondaexpansiva.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/Pfern.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/pmiguel.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/rail.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/telaranya.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/vortice.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DObjs/weapons.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DChars/Actors.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DChars/actors_javi.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DChars/ork.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DChars/Bar.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DChars/Kgt.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DChars/Kgtskin1.mmp" ) );
+        m_Level.LoadTextures( MakePath( "3DChars/Kgtskin2.mmp" ) );
+
         m_Level.Load(m_World, MakePath(demo_gamelevel.GetString()));
+
+        
 
         String ghostSectors = demo_gamelevel.GetString();
         PathUtils::sSetExtensionInplace(ghostSectors, "sf", true);
         
         m_SF.Load(MakePath(ghostSectors));
 
-        auto sound = sGetResourceManager().CreateResourceFromFile<SoundResource>("/FS/" + MakePath(demo_music.GetString()));
+        //LoadAndSpawnModel(MakePath("3DObjs/Dragon_estatua.BOD"), Float3(-2, 12, 4), Quat::sRotationX(Math::_HALF_PI) /*Quat::sIdentity()*/);
+        //LoadAndSpawnModel(MakePath("3DObjs/Gargola_estatua.BOD"), Float3(-2, 2, 4), Quat::sRotationX(Math::_HALF_PI) /*Quat::sIdentity()*/);
+        //LoadAndSpawnModel(MakePath("3DObjs/Gargola02.BOD"), Float3(-2, 12, 4), Quat::sRotationX(Math::_HALF_PI) /*Quat::sIdentity()*/);
+        //LoadAndSpawnModel(MakePath("3DObjs/EstatuaGolem.BOD"), Float3(-2, 12, 4), Quat::sRotationX(Math::_HALF_PI) /*Quat::sIdentity()*/);
+        //LoadAndSpawnModel(MakePath("3DObjs/bigsword.BOD"), Float3(-2, 2, 4), Quat::sRotationX(Math::_HALF_PI) /*Quat::sIdentity()*/);
+        LoadAndSpawnModel(MakePath("3DChars/Ork.BOD"), Float3(-2, 2, 4), Quat::sRotationX(Math::_HALF_PI) /*Quat::sIdentity()*/);
+        //LoadAndSpawnModel(MakePath("3DObjs/sectorvolcan.BOD"), Float3(-2, 2, 4), Quat::sRotationX(Math::_HALF_PI) /*Quat::sIdentity()*/);
+        //LoadAndSpawnModel(MakePath("3DObjs/Hacha2hojas.BOD"), Float3(-2, 2, 4), Quat::sRotationX(Math::_HALF_PI) /*Quat::sIdentity()*/);
+        //LoadAndSpawnModel(MakePath("3DObjs/lampara.BOD"), Float3(-2, 2, 4), Quat::sRotationX(Math::_HALF_PI) /*Quat::sIdentity()*/);
+        //LoadAndSpawnModel(MakePath("3DObjs/corblade.BOD"), Float3(-2, 2, 4), Quat::sRotationX(Math::_HALF_PI) /*Quat::sIdentity()*/);
+        //LoadAndSpawnModel(MakePath("3DObjs/rhinoclub.BOD"), Float3(-2, 2, 4), Quat::sRotationX(Math::_HALF_PI) /*Quat::sIdentity()*/);
+        //LoadAndSpawnModel(MakePath("3DObjs/escudonpoly.BOD"), Float3(-2, 2, 4), Quat::sRotationX(Math::_HALF_PI) /*Quat::sIdentity()*/);
+        //LoadAndSpawnModel(MakePath("3DObjs/tapizesc.BOD"), Float3(-2, 2, 4), Quat::sRotationX(Math::_HALF_PI) /*Quat::sIdentity()*/);
+        //LoadAndSpawnModel(MakePath("3DObjs/espadonPoly.BOD"), Float3(-2, 2, 4), Quat::sRotationX(Math::_HALF_PI) /*Quat::sIdentity()*/);
+    
+        //anim.Load(MakePath("Anm/Ork_patrol1.BMV"));
+        anim.Load(MakePath("Anm/Ork_wlk_1h.BMV"));
+        
+        //auto sound = sGetResourceManager().CreateResourceFromFile<SoundResource>("/FS/" + MakePath(demo_music.GetString()));
+
+        auto sound = sGetResourceManager().Load<Sound>("/FS/" + MakePath(demo_music.GetString()));
 
         {
             GameObject* musicPlayer;
@@ -304,6 +494,7 @@ public:
             GameObject* object;
             m_World->CreateObject(desc, object);
             object->SetDirection({1, -1, -1});
+            //object->SetDirection({0, -1, 0});
 
             DirectionalLightComponent* dirlight;
             object->CreateComponent(dirlight);
@@ -349,6 +540,56 @@ public:
                 renderer.DrawLine(Float3(v.X, sector.FloorHeight, v.Y), Float3(v.X, sector.RoofHeight, v.Y));
         }
 #endif
+
+        // Draw skeleton:
+
+        Vector<Float3x4> localMatrices;
+        Vector<Float3x4> absoluteMatrices;
+
+        for (auto& bone : model.Bones)
+            localMatrices.Add(ConvertMatrix3x4(bone.Matrix));
+
+        int frameCount = anim.RootMotion.Size();
+        int frameNum = int(m_World->GetTick().RunningTime * 10) % frameCount;
+
+        absoluteMatrices.Resize(model.Bones.Size());
+        for (int i = 0; i < model.Bones.Size(); ++i)
+        {
+            auto& node = anim.BoneTransforms[i];
+
+            Quat rotation = node.Keyframes[frameNum];
+
+            Float3 translation = localMatrices[i].DecomposeTranslation();
+
+            if (i == 0)
+                translation += Float3(anim.RootMotion[frameNum]);
+
+            localMatrices[i].Compose(translation, rotation.ToMatrix3x3());
+
+            auto& bone = model.Bones[i];
+            if (bone.ParentIndex != -1)
+            {
+                HK_ASSERT(bone.ParentIndex < i);
+                absoluteMatrices[i] = absoluteMatrices[bone.ParentIndex] * localMatrices[i];
+            }
+            else
+                absoluteMatrices[i] = localMatrices[i];
+        }
+
+        Float3x4 objectMat;
+        objectMat.Compose(Float3(0,2,-2), Quat::sRotationX(Math::_HALF_PI).ToMatrix3x3()/*, Float3(0.001)*/);
+        for (int i = 0; i < model.Bones.Size(); ++i)
+        {
+            auto& bone = model.Bones[i];
+
+            if (bone.ParentIndex != -1)
+            {
+                Float3 p0 = ConvertCoord(absoluteMatrices[i].DecomposeTranslation());
+                Float3 p1 = ConvertCoord(absoluteMatrices[bone.ParentIndex].DecomposeTranslation());
+
+                renderer.DrawLine(objectMat*p0, objectMat*p1);
+            }
+        }
     }
 };
 

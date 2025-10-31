@@ -39,10 +39,10 @@ void BladeAnimation::Load(StringView fileName)
     if (!f)
         return;
 
-    String name = f.ReadString();
+    Name = f.ReadString();
 
-    Nodes.Resize(f.ReadInt32());
-    for (auto& node : Nodes)
+    BoneTransforms.Resize(f.ReadInt32());
+    for (auto& node : BoneTransforms)
     {
         node.Keyframes.Resize(f.ReadInt32());
 
@@ -55,8 +55,8 @@ void BladeAnimation::Load(StringView fileName)
         }
     }
 
-    Keyframes.Resize(f.ReadInt32());
-    for (auto& position : Keyframes)
+    RootMotion.Resize(f.ReadInt32());
+    for (auto& position : RootMotion)
     {
         position = f.ReadObject<Double3>();
     }
@@ -64,6 +64,7 @@ void BladeAnimation::Load(StringView fileName)
 
 void BladeAnimation::Clear()
 {
-    Nodes.Clear();
-    Keyframes.Clear();
+    Name.Clear();
+    BoneTransforms.Clear();
+    RootMotion.Clear();
 }

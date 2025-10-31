@@ -38,13 +38,14 @@ using namespace Hk;
 class BladeAnimation
 {
 public:
-    struct Node
+    struct BoneTransform
     {
         Vector<Quat> Keyframes;
     };
 
-    Vector<Node> Nodes;
-    Vector<Double3> Keyframes;
+    String Name;
+    Vector<BoneTransform> BoneTransforms;
+    Vector<Double3> RootMotion;
 
     void Load(StringView fileName);
     void Clear();

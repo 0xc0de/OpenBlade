@@ -28,9 +28,10 @@ SOFTWARE.
 
 #pragma once
 
-#include <Hork/Geometry/BV/BvAxisAlignedBox.h>
-#include <Hork/Math/Plane.h>
+#include <Hork/Core/UniqueRef.h>
 #include <Hork/Core/Containers/Vector.h>
+#include <Hork/Math/Plane.h>
+#include <Hork/Geometry/BV/BvAxisAlignedBox.h>
 
 using namespace Hk;
 

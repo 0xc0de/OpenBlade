@@ -66,7 +66,7 @@ void BladeLevel::Load(World* world, StringView name)
     bool skydomeSpecified = false;
     String bwfile;
 
-    UnloadTextures();
+    //UnloadTextures();
     //FreeWorld(); // TODO
 
     m_SkyColorAvg.Clear();
@@ -137,7 +137,7 @@ void BladeLevel::LoadDome(StringView fileName)
     int32_t texCount = file.ReadInt32();
 
     HeapBlob trueColorData;
-    UniqueRef<TextureResource> textureResource;
+    TextureRef texture;
     
     for (int i = 0; i < texCount; i++)
     {
@@ -163,14 +163,14 @@ void BladeLevel::LoadDome(StringView fileName)
             return;
         }
 
-        if (!textureResource)
+        if (!texture)
         {
-            textureResource = MakeUnique<TextureResource>();
-            textureResource->AllocateCubemap(GameApplication::sGetRenderDevice(), TEXTURE_FORMAT_SRGBA8_UNORM, 1, width);
+            texture = resourceMngr.Acquire<Texture>("internal_skybox");
+            texture->AllocateCubemap(TEXTURE_FORMAT_SRGBA8_UNORM, 1, width);
             trueColorData.Reset(width * height * 4);
         }
 
-        if (textureResource->GetWidth() != static_cast<uint32_t>(width))
+        if (texture->GetWidth() != static_cast<uint32_t>(width))
         {
             LOG("Invalid dome face\n");
             return;
@@ -254,10 +254,8 @@ void BladeLevel::LoadDome(StringView fileName)
             FlipImageX(trueColorData.GetData(), width, height, 4, width * 4);
         }
 
-        textureResource->WriteDataCubemap(0, 0, width, height, faceNum, 0, trueColorData.GetData());
+        texture->WriteDataCubemap(0, 0, width, height, faceNum, 0, trueColorData.GetData());
     }
-
-    resourceMngr.CreateResourceWithData("internal_skybox", std::move(textureResource));
 }
 
 void BladeLevel::LoadTextures(StringView fileName)
@@ -342,19 +340,17 @@ void BladeLevel::LoadTextures(StringView fileName)
         ImageMipmapConfig mipmapConfig; // use default params
         ImageStorage imageStorage = CreateImage(image, &mipmapConfig, IMAGE_STORAGE_NO_ALPHA, IMAGE_IMPORT_FLAGS_DEFAULT);
 
-        UniqueRef<TextureResource> textureResource = MakeUnique<TextureResource>(std::move(imageStorage));
-        textureResource->Upload(GameApplication::sGetRenderDevice());
+        auto texture = resourceMngr.Acquire<Texture>(textureName);
+        texture->CreateFromImage(std::move(imageStorage));
 
-        m_Textures.Add(resourceMngr.CreateResourceWithData(textureName, std::move(textureResource)));
+        m_Textures.EmplaceBack(std::move(texture));
     }
 }
 
 void BladeLevel::UnloadTextures()
 {
-    auto& resourceMngr = GameApplication::sGetResourceManager();
-
-    for (auto textureHandle : m_Textures)
-        resourceMngr.PurgeResourceData(textureHandle);
+    for (auto texture : m_Textures)
+        texture->Purge();
 
     m_Textures.Clear();
 }
@@ -469,17 +465,15 @@ void BladeLevel::LoadWorld(StringView fileName)
 
     // Create materials
     m_Materials.Clear();
-    auto materialResource = resourceMngr.GetResource<MaterialResource>("/Root/materials/compiled/wall.mat");
-    for (auto& textureHandle : m_Textures)
+    auto materialResource = resourceMngr.Acquire<Material>("/Root/materials/compiled/wall.mat");
+    for (auto& texture : m_Textures)
     {
-        auto& textureProxy = resourceMngr.GetProxy(textureHandle);
+        IntrusiveRef<MatInstance> matInstance(new MatInstance);
 
-        Ref<Material> material = MakeRef<Material>(textureProxy.GetName());
+        matInstance->SetResource(materialResource);
+        matInstance->SetTexture(0, texture);
 
-        material->SetResource(materialResource);
-        material->SetTexture(0, textureHandle);
-
-        m_Materials.Add(std::move(material));
+        m_Materials[texture->GetName()] = std::move(matInstance);
     }
 
     Vector<Vector<MeshVertex>> vertexBatches(bw.m_TextureNames.Size());
@@ -498,7 +492,7 @@ void BladeLevel::LoadWorld(StringView fileName)
     GameObject* object;
     m_World->CreateObject(desc, object);
 
-    Ref<Material> skyMaterial = materialMngr.TryGet("skywall");
+    MatInstanceHandle skyMaterial = materialMngr.FindMaterial("skywall");
 
     for (auto const& face : bw.m_Faces)
     {
@@ -775,10 +769,7 @@ void BladeLevel::LoadWorld(StringView fileName)
         if (vertexBatch.IsEmpty())
             continue;
 
-        auto surfaceHandle = GameApplication::sGetResourceManager().CreateResource<MeshResource>("surface_" + Core::ToString(textureNum));
-
-        MeshResource* resource = GameApplication::sGetResourceManager().TryGet(surfaceHandle);
-        HK_ASSERT(resource);
+        MeshRef surface(new Mesh);
 
         BvAxisAlignedBox bounds;
         bounds.Clear();
@@ -790,17 +781,17 @@ void BladeLevel::LoadWorld(StringView fileName)
         alloc.VertexCount = vertexBatch.Size();
         alloc.IndexCount = indexBatch.Size();
 
-        resource->Allocate(alloc);
-        resource->WriteVertexData(vertexBatch.ToPtr(), vertexBatch.Size(), 0);
-        resource->WriteIndexData(indexBatch.ToPtr(), indexBatch.Size(), 0);
-        resource->SetBoundingBox(bounds);
+        surface->Allocate(alloc);
+        surface->WriteVertexData(vertexBatch.ToPtr(), vertexBatch.Size(), 0);
+        surface->WriteIndexData(indexBatch.ToPtr(), indexBatch.Size(), 0);
+        surface->SetBoundingBox(bounds);
 
-        MeshSurface& meshSurface = resource->LockSurface(0);
+        MeshSurface& meshSurface = surface->LockSurface(0);
         meshSurface.BoundingBox = bounds;
 
         StaticMeshComponent* mesh;
         object->CreateComponent(mesh);
-        mesh->SetMesh(surfaceHandle);
+        mesh->SetMesh(surface);
         mesh->SetLocalBoundingBox(bounds);
         mesh->SetCastShadow(false);
 
@@ -813,10 +804,7 @@ void BladeLevel::LoadWorld(StringView fileName)
         const Vector<MeshVertex>& vertexBatch = skydomeVertexBuffer;
         const Vector<uint32_t>& indexBatch = skydomeIndexBuffer;
 
-        auto surfaceHandle = GameApplication::sGetResourceManager().CreateResource<MeshResource>("surface_skydome");
-
-        MeshResource* resource = GameApplication::sGetResourceManager().TryGet(surfaceHandle);
-        HK_ASSERT(resource);
+        MeshRef surface(new Mesh);
 
         BvAxisAlignedBox bounds;
         bounds.Clear();
@@ -828,17 +816,17 @@ void BladeLevel::LoadWorld(StringView fileName)
         alloc.VertexCount = vertexBatch.Size();
         alloc.IndexCount = indexBatch.Size();
 
-        resource->Allocate(alloc);
-        resource->WriteVertexData(vertexBatch.ToPtr(), vertexBatch.Size(), 0);
-        resource->WriteIndexData(indexBatch.ToPtr(), indexBatch.Size(), 0);
-        resource->SetBoundingBox(bounds);
+        surface->Allocate(alloc);
+        surface->WriteVertexData(vertexBatch.ToPtr(), vertexBatch.Size(), 0);
+        surface->WriteIndexData(indexBatch.ToPtr(), indexBatch.Size(), 0);
+        surface->SetBoundingBox(bounds);
 
-        MeshSurface& meshSurface = resource->LockSurface(0);
+        MeshSurface& meshSurface = surface->LockSurface(0);
         meshSurface.BoundingBox = bounds;
 
         StaticMeshComponent* mesh;
         object->CreateComponent(mesh);
-        mesh->SetMesh(surfaceHandle);
+        mesh->SetMesh(surface);
         mesh->SetLocalBoundingBox(bounds);
         mesh->SetCastShadow(false);
 
@@ -847,10 +835,7 @@ void BladeLevel::LoadWorld(StringView fileName)
 
     // Create level shadow caster
     {
-        auto surfaceHandle = GameApplication::sGetResourceManager().CreateResource<MeshResource>("surface_shadow");
-
-        MeshResource* resource = GameApplication::sGetResourceManager().TryGet(surfaceHandle);
-        HK_ASSERT(resource);
+        MeshRef surface(new Mesh);
 
         BvAxisAlignedBox bounds;
         bounds.Clear();
@@ -862,21 +847,21 @@ void BladeLevel::LoadWorld(StringView fileName)
         alloc.VertexCount = shadowVertexBuffer.Size();
         alloc.IndexCount = shadowIndexBuffer.Size();
 
-        resource->Allocate(alloc);
-        resource->WriteVertexData(shadowVertexBuffer.ToPtr(), shadowVertexBuffer.Size(), 0);
-        resource->WriteIndexData(shadowIndexBuffer.ToPtr(), shadowIndexBuffer.Size(), 0);
-        resource->SetBoundingBox(bounds);
+        surface->Allocate(alloc);
+        surface->WriteVertexData(shadowVertexBuffer.ToPtr(), shadowVertexBuffer.Size(), 0);
+        surface->WriteIndexData(shadowIndexBuffer.ToPtr(), shadowIndexBuffer.Size(), 0);
+        surface->SetBoundingBox(bounds);
 
-        MeshSurface& meshSurface = resource->LockSurface(0);
+        MeshSurface& meshSurface = surface->LockSurface(0);
         meshSurface.BoundingBox = bounds;
 
         StaticMeshComponent* mesh;
         object->CreateComponent(mesh);
-        mesh->SetMesh(surfaceHandle);
+        mesh->SetMesh(surface);
         mesh->SetLocalBoundingBox(bounds);
         mesh->SetShadowMode(ShadowMode::CastOnlyShadow);
 
-        mesh->SetMaterial(materialMngr.TryGet("shadow_caster"));
+        mesh->SetMaterial(materialMngr.FindMaterial("shadow_caster"));
     }
 }
 #if 0
@@ -1381,18 +1366,16 @@ void BladeLevel::FilterWinding_r(Face* face, BSPNode* node, BSPNode* leaf)
 }
 #endif
 
-Ref<Material> BladeLevel::FindMaterial(StringView name)
+MatInstanceHandle BladeLevel::FindMaterial(StringView name)
 {
-    for (auto& material : m_Materials)
-    {
-        if (!material->GetName().Icmp(name))
-            return material;
-    }
+    auto it = m_Materials.Find(name);
+    if (it != m_Materials.End())
+        return it->second;
 
     //HK_ASSERT(0);
 
     auto& materialMngr = GameApplication::sGetMaterialManager();
-    return materialMngr.TryGet("grid8");
+    return materialMngr.FindMaterial("grid8");
 }
 
 void BladeLevel::DrawDebug(DebugRenderer& renderer)

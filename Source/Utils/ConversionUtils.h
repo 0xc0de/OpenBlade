@@ -51,3 +51,15 @@ HK_FORCEINLINE HK_NODISCARD PlaneD ConvertPlane(PlaneD const& plane)
     newPlane.D *= 0.001;
     return newPlane;
 }
+
+HK_FORCEINLINE HK_NODISCARD Float3x4 ConvertMatrix3x4(Float4x4 const& matrix)
+{
+    Float4x4 m = matrix;
+    m.TransposeSelf();
+
+    Float3x4 m3x4;
+    m3x4[0] = m[0];
+    m3x4[1] = m[1];
+    m3x4[2] = m[2];
+    return m3x4;
+}

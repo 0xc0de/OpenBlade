@@ -80,9 +80,9 @@ void BladeModel::Load(StringView fileName)
         face.Indices[1] = f.ReadInt32();
         face.Indices[2] = f.ReadInt32();
 
-        //Vertices[face.Indices[0]].Faces.Add(i);
-        //Vertices[face.Indices[1]].Faces.Add(i);
-        //Vertices[face.Indices[2]].Faces.Add(i);
+        Vertices[face.Indices[0]].Faces.Add(i);
+        Vertices[face.Indices[1]].Faces.Add(i);
+        Vertices[face.Indices[2]].Faces.Add(i);
 
         face.TextureNum = ReadTextureName(f);
 
@@ -95,6 +95,8 @@ void BladeModel::Load(StringView fileName)
 
         face.Unknown = f.ReadInt32();
         assert(face.Unknown == 0); // ???
+
+        face.Group = 1;
     }
 
     SetDumpLog(true);
@@ -226,9 +228,14 @@ void BladeModel::Load(StringView fileName)
     {
         // Groups
         auto count = f.ReadInt32();
-        assert(count == faceCount);
-        for (int n = 0; n < count; ++n)
-            DumpByte(f);
+        HK_ASSERT(count == faceCount);
+        if (count == faceCount)
+        {
+            for (int n = 0; n < count; ++n)
+                Faces[n].Group = DumpByte(f);
+        }
+        else
+            f.SeekCur(count);
 
         --numDataChunks;
     }

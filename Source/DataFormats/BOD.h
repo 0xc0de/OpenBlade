@@ -41,7 +41,7 @@ public:
     {
         Double3 Position;
         Double3 Normal;
-        //Vector<int> Faces;
+        Vector<int> Faces;
     };
 
     struct Face
@@ -50,6 +50,7 @@ public:
         Float2 TexCoords[3];
         int Unknown;
         int TextureNum;
+        uint8_t Group;
     };
 
     struct Bone
