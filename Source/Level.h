@@ -53,12 +53,12 @@ public:void LoadTextures(StringView fileName);private:
     void LoadWorld(StringView fileName);
     void CreateWindings_r(Vector<MeshVertex>& vertexBuffer, Vector<uint32_t>& indexBuffer,
         BladeWorld::Face const& face, Vector<Double3> const& winding, BladeWorld::BSPNode const* node, BladeWorld::BSPNode const* texInfo);
-public:MatInstanceHandle FindMaterial(StringView name);private:
+public:MatInstanceRef FindMaterial(StringView name);private:
 
     World* m_World;
     Float3 m_SkyColorAvg;
     Vector<TextureRef> m_Textures;
-    StringHashMap<MatInstanceHandle> m_Materials;
+    StringHashMap<MatInstanceRef> m_Materials;
 
     BladeWorld bw;
 };

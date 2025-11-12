@@ -492,7 +492,7 @@ void BladeLevel::LoadWorld(StringView fileName)
     GameObject* object;
     m_World->CreateObject(desc, object);
 
-    MatInstanceHandle skyMaterial = materialMngr.FindMaterial("skywall");
+    MatInstanceRef skyMaterial = materialMngr.FindMaterial("skywall");
 
     for (auto const& face : bw.m_Faces)
     {
@@ -1366,7 +1366,7 @@ void BladeLevel::FilterWinding_r(Face* face, BSPNode* node, BSPNode* leaf)
 }
 #endif
 
-MatInstanceHandle BladeLevel::FindMaterial(StringView name)
+MatInstanceRef BladeLevel::FindMaterial(StringView name)
 {
     auto it = m_Materials.Find(name);
     if (it != m_Materials.End())
